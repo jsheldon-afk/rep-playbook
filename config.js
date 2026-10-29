@@ -64,6 +64,7 @@ window.CONFIG = {
   // ---------- Dialing ----------
   dialsPerHour: 45,        // Team target. Calls library, 90 days: about 40-50 per active hour (power 45, parallel 74)
   defaultDialTarget: 120,  // Team daily target
+  callingDaysPerMonth: 21, // for "a month" payoffs
   dialsPerCallbackToday: 1,
   demoPrepMinutes: 10,
 

@@ -447,6 +447,10 @@
       callbacks: o.callbacks,
       dials: Math.round(mDone + rDone + o.callbacks),
       idleMinutes: Math.floor(spare / dph * 60),
+      // Open dials left on the calendar, by kind, and what filling them would book.
+      spare: { mobile: Math.floor(capM - mFit), restaurant: Math.floor(capR - rFit), flex: Math.floor(flex) },
+      spareMeetings: (capM - mFit) * r.mobileBlock + (capR - rFit) * r.restaurantBlock + flex * r.mobileBlock,
+      shortMeetings: (o.mobileTasks - mDone) * r.mobileBlock + (o.restaurantTasks - rDone) * r.restaurantBlock,
       expected: mDone * r.mobileBlock + rDone * r.restaurantBlock + o.callbacks * r.callback
     };
   };
@@ -1179,6 +1183,11 @@
     });
     return { cap: cap, source: "calendar" };
   }
+  function payoff(perDay) {
+    var month = perDay * C.callingDaysPerMonth;
+    var d = perDay < 0.1 ? perDay.toFixed(2) : perDay.toFixed(1);
+    return "+" + d + (d === "1.0" ? " meeting" : " meetings") + " today (about " + Math.max(1, Math.round(month)) + " more a month)";
+  }
   function renderTaskCheck(cur) {
     var dd = dayData(), box = $("task-check"); box.innerHTML = "";
     var cf = $("callback-field"); cf.innerHTML = "";
@@ -1192,22 +1201,23 @@
     if (!total) { box.appendChild(el("p", { class: "hint", text: "Enter your call tasks to check them against " + (c.source === "calendar" ? "the calling time on your calendar." : "today's plan.") + " Team target: " + C.defaultDialTarget + " dials a day." })); return; }
 
     var src = c.source === "calendar" ? "Calling time on your calendar" : "Calling time in today's plan";
-    function row(label, r, minutes) {
+    function room(n) { return el("td", { class: "num", text: n > 0 ? "+" + n : "\u2014" }); }
+    function row(label, r, minutes, spare) {
       return el("tr", null, [el("td", { text: label }), el("td", { class: "num", text: String(r.tasks) }), el("td", { class: "num", text: minutes ? L.dur(minutes) : "None" }),
-        el("td", { class: "num", text: String(r.capacity) }),
+        el("td", { class: "num", text: String(r.capacity) }), room(spare),
         el("td", { class: r.short > 0 ? "bad" : "ok", text: r.short > 0 ? r.short + " won't fit" : "Fits" })]);
     }
-    var tb = el("tbody", null, [row("Mobile", chk.mobile, c.cap.mobile), row("Restaurant", chk.restaurant, c.cap.restaurant)]);
-    if (c.cap.flex) tb.appendChild(el("tr", null, [el("td", { text: "Callback and general call blocks" }), el("td", { class: "num", text: "\u2014" }), el("td", { class: "num", text: L.dur(c.cap.flex) }), el("td", { class: "num", text: String(chk.flexCapacity) }), el("td", { class: "hint", text: "Covers overflow from either" })]));
-    tb.appendChild(el("tr", null, [el("td", { text: "Callbacks" }), el("td", { class: "num", text: String(cbs) }), el("td", { class: "num", text: "At their own times" }), el("td", { class: "num", text: String(cbs) }), el("td", { class: "ok", text: cbs ? "Fits" : "\u2014" })]));
+    var tb = el("tbody", null, [row("Mobile", chk.mobile, c.cap.mobile, chk.spare.mobile), row("Restaurant", chk.restaurant, c.cap.restaurant, chk.spare.restaurant)]);
+    if (c.cap.flex) tb.appendChild(el("tr", null, [el("td", { text: "Callback and general call blocks" }), el("td", { class: "num", text: "\u2014" }), el("td", { class: "num", text: L.dur(c.cap.flex) }), el("td", { class: "num", text: String(chk.flexCapacity) }), room(chk.spare.flex), el("td", { class: "hint", text: "Covers overflow from either" })]));
+    tb.appendChild(el("tr", null, [el("td", { text: "Callbacks" }), el("td", { class: "num", text: String(cbs) }), el("td", { class: "num", text: "At their own times" }), el("td", { class: "num", text: String(cbs) }), room(0), el("td", { class: "ok", text: cbs ? "Fits" : "\u2014" })]));
     box.appendChild(el("div", { class: "table-scroll", style: "margin-top:14px" }, [el("table", { class: "check-table" }, [
-      el("thead", null, [el("tr", null, [el("th", { text: "Call tasks" }), el("th", { class: "num", text: "Tasks" }), el("th", { class: "num", text: src }), el("th", { class: "num", text: "Can dial" }), el("th", { text: "" })])]), tb])]));
+      el("thead", null, [el("tr", null, [el("th", { text: "Call tasks" }), el("th", { class: "num", text: "Tasks" }), el("th", { class: "num", text: src }), el("th", { class: "num", text: "Can dial" }), el("th", { class: "num", text: "Room for more" }), el("th", { text: "" })])]), tb])]));
 
     var shortTotal = Math.max(0, chk.mobile.short) + Math.max(0, chk.restaurant.short);
     if (shortTotal > 0) {
       var needMin = Math.ceil(shortTotal / C.dialsPerHour * 60 / 15) * 15;
       var v = el("div", { class: "verdict short", text: "You won't get through " + shortTotal + " of your tasks. " + (c.source === "calendar"
-        ? "Add about " + L.dur(needMin) + " of calling time to your calendar, then click Refresh."
+        ? "Add about " + L.dur(needMin) + " of calling time to your calendar, then click Refresh. Fitting them in: " + payoff(chk.shortMeetings) + "."
         : "Today's plan only has room for about " + chk.dials + " dials. Move a meeting or carry the rest to tomorrow.") });
       box.appendChild(v);
       if (c.source === "calendar") {
@@ -1224,9 +1234,16 @@
       }
     } else if (chk.idleMinutes >= 15) {
       var idle = L.dur(Math.floor(chk.idleMinutes / 5) * 5);
-      box.appendChild(el("div", { class: "verdict idle", text: c.source === "calendar"
-        ? "You'll have about " + idle + " of calling time on your calendar with nothing to call. Pull more call tasks, or use the time to clean leads."
-        : "Today's plan has about " + idle + " more calling time than your tasks need. Only book the blocks you need, or pull more call tasks." }));
+      var addM = chk.spare.mobile, addR = chk.spare.restaurant, addF = chk.spare.flex, addAll = addM + addR + addF;
+      var parts = [];
+      if (addM) parts.push(addM + " mobile");
+      if (addR) parts.push(addR + " restaurant");
+      if (addF) parts.push(addF + " of either");
+      var v2 = el("div", { class: "verdict idle" }, [
+        el("div", { text: "You have about " + idle + " of calling time on your calendar with nothing to call." }),
+        el("div", { style: "margin-top:6px", text: "Recommendation: pull about " + addAll + " more calls from your cadences (" + parts.join(", ") + "). That's " + payoff(chk.spareMeetings) + "." })
+      ]);
+      box.appendChild(v2);
     } else {
       box.appendChild(el("div", { class: "verdict good", text: "Your " + (c.source === "calendar" ? "calendar" : "plan") + " fits today's call tasks." }));
     }
