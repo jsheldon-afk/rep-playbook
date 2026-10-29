@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rep Playbook</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-head">
+  <div class="wrap">
+    <p class="brand">Rep Playbook <small>How we work, and how to plan your calling day</small></p>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#how-it-works" id="tab-how">1. How it works</a>
+      <a href="#my-day" id="tab-day">2. My day</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- ===================== TAB 1 ===================== -->
+  <div class="tab-panel" id="panel-how" role="region" aria-labelledby="tab-how">
+    <p class="tab-intro">What happens to an account from the moment it's yours, how to log every call, and exactly what to do after each one.</p>
+
+    <div class="auto-box" id="auto-box"></div>
+
+    <section class="block" id="flow-section">
+      <h2>The flow</h2>
+      <p class="lede">Click any step to see what it means and how to log it.</p>
+      <div class="flow" id="flow"></div>
+      <div class="compare" id="compare"></div>
+    </section>
+
+    <section class="block" id="cheat-section">
+      <h2>How to log a call</h2>
+      <p class="lede">The disposition says <strong>who</strong> you reached. The sentiment says <strong>what happened</strong>. Pick them in that order.</p>
+      <div id="cheat"></div>
+    </section>
+
+    <section class="block" id="reject-section">
+      <h2>Which reject reason?</h2>
+      <p class="lede">When you're done with an account, answer these questions to find the right Temporarily Reject reason.</p>
+      <div class="wizard" id="reject-wizard"></div>
+      <details class="collapsible">
+        <summary>See every reason</summary>
+        <div id="reject-table"></div>
+      </details>
+    </section>
+
+    <section class="block" id="callback-section">
+      <h2>The 5-callback rule</h2>
+      <div id="callback-rule"></div>
+    </section>
+
+    <section class="block" id="why-section">
+      <h2>Why callbacks matter</h2>
+      <div id="why"></div>
+    </section>
+
+    <section class="block" id="glossary-section">
+      <h2>Glossary</h2>
+      <details class="collapsible">
+        <summary>Show every term</summary>
+        <dl class="glossary" id="glossary"></dl>
+      </details>
+    </section>
+
+    <section class="block" id="sim-section">
+      <h2>What do I do next?</h2>
+      <p class="lede">Just got off a call? Answer a few questions and get the exact steps.</p>
+      <div class="wizard" id="sim"></div>
+    </section>
+  </div>
+
+  <!-- ===================== TAB 2 ===================== -->
+  <div class="tab-panel" id="panel-day" role="region" aria-labelledby="tab-day" hidden>
+    <p class="tab-intro">Add your meetings and your dial goal. You'll get a calling plan built around them, and what it should book.</p>
+
+    <div class="day-toggle" id="day-toggle" role="group" aria-label="Pick a day"></div>
+
+    <div class="day-grid">
+      <div>
+        <div class="panel" id="cal-panel">
+          <h3>Google Calendar</h3>
+          <div id="cal-box" aria-live="polite"></div>
+        </div>
+
+        <div class="panel">
+          <h3>Your meetings</h3>
+          <label for="paste">Paste meetings, one per line</label>
+          <p class="hint">Times in Eastern. Example: 10:00-10:30 Demo, or 2pm - 2:45pm Team meeting</p>
+          <textarea id="paste" placeholder="10:00-10:30 Demo&#10;2pm - 2:45pm Team meeting"></textarea>
+          <button class="btn" id="paste-add" type="button">Add pasted meetings</button>
+          <ul class="errors" id="paste-errors" aria-live="polite"></ul>
+
+          <h3 style="margin-top:20px">Or add one</h3>
+          <div class="row">
+            <div><label for="add-start">Start (ET)</label><input type="time" id="add-start" step="300"></div>
+            <div><label for="add-end">End (ET)</label><input type="time" id="add-end" step="300"></div>
+          </div>
+          <label for="add-label">What is it?</label>
+          <input type="text" id="add-label" placeholder="Demo">
+          <label for="add-type">Type</label>
+          <select id="add-type">
+            <option value="meeting">Meeting</option>
+            <option value="callback">Agreed callback (owner picked the time, 15 min)</option>
+          </select>
+          <p class="hint">For an agreed callback you only need the start time.</p>
+          <button class="btn" id="add-one" type="button" style="margin-top:10px">Add to my day</button>
+          <ul class="errors" id="add-errors" aria-live="polite"></ul>
+
+          <ul class="items" id="items" aria-label="Today's meetings"></ul>
+
+          <label class="check" style="margin-top:16px"><input type="checkbox" id="prep-demos"> <span id="prep-label">Add prep time before each demo</span></label>
+        </div>
+
+        <div class="panel">
+          <h3>Your numbers</h3>
+          <label for="callbacks-due">Callbacks due today</label>
+          <input type="number" id="callbacks-due" min="0" max="200" step="1">
+          <label for="dial-target">Dials I want to make today</label>
+          <input type="number" id="dial-target" min="0" max="1000" step="5">
+          <button class="btn" id="clear-day" type="button" style="margin-top:16px">Clear my day</button>
+        </div>
+
+        <div class="panel" id="helper">
+          <h3>When an owner asks for a callback</h3>
+          <div class="row">
+            <div><label for="h-zone">Restaurant's time zone</label><select id="h-zone"></select></div>
+            <div><label for="h-line">Calling their</label><select id="h-line"><option value="mobile">Mobile</option><option value="restaurant">Restaurant line</option></select></div>
+          </div>
+          <div class="helper-out" id="helper-out" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="suggestions" id="suggestions" aria-live="polite"></div>
+        <div class="changes" id="changes" aria-live="polite"></div>
+        <div class="legend" id="legend"></div>
+        <div class="calendar" id="calendar"></div>
+        <div class="results" id="results" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="footer-note">Numbers come from Seated's calls from Jul 31 to Oct 28, 2026. Your inputs on the My day tab are saved only in this browser.</p>
+</main>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
