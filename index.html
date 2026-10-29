@@ -83,8 +83,10 @@
         </div>
 
         <div class="panel">
-          <h3>Your meetings</h3>
-          <p class="hint">Not on your calendar? Add it here. Times in Eastern.</p>
+          <h3>Today's meetings</h3>
+          <p class="hint" id="items-hint"></p>
+          <div id="manual-add">
+          <p class="hint">Times in Eastern.</p>
           <div class="row">
             <div><label for="add-start">Start (ET)</label><input type="time" id="add-start" step="300"></div>
             <div><label for="add-end">End (ET)</label><input type="time" id="add-end" step="300"></div>
@@ -100,6 +102,7 @@
           <button class="btn" id="add-one" type="button" style="margin-top:10px">Add to my day</button>
           <ul class="errors" id="add-errors" aria-live="polite"></ul>
 
+          </div>
           <ul class="items" id="items" aria-label="Today's meetings"></ul>
         </div>
 

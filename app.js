@@ -1360,6 +1360,11 @@
     if (document.activeElement !== $("mobile-tasks")) $("mobile-tasks").value = dd.mobileTasks || "";
     if (document.activeElement !== $("restaurant-tasks")) $("restaurant-tasks").value = dd.restaurantTasks || "";
     renderItems();
+    var connected = calFresh();
+    $("manual-add").hidden = connected;
+    $("items-hint").textContent = connected
+      ? "From your Google Calendar. Set anything you'll call through to Ignore."
+      : "Connect your calendar to fill this in, or add meetings by hand.";
     var cur = planFor(state.day);
     renderCalendar(cur.plan);
     renderToday(cur);
