@@ -60,9 +60,20 @@
 
   <!-- ===================== TAB 2 ===================== -->
   <div class="tab-panel" id="panel-day" role="region" aria-labelledby="tab-day" hidden>
-    <p class="tab-intro">Add your meetings and your dial goal. You'll get a calling plan built around them, and what it should book.</p>
+    <p class="tab-intro">Enter today's call tasks. You'll see whether the calling time on your calendar fits them, and a plan for when to call which numbers.</p>
 
     <div class="day-toggle" id="day-toggle" role="group" aria-label="Pick a day"></div>
+
+    <div class="panel tasks" id="tasks">
+      <h3>Today's call tasks</h3>
+      <p class="hint">Enter how many call tasks you have in Salesloft today. Callbacks are counted from your calendar.</p>
+      <div class="task-inputs">
+        <div><label for="mobile-tasks">Mobile call tasks</label><input type="number" id="mobile-tasks" min="0" max="1000" step="1"></div>
+        <div><label for="restaurant-tasks">Restaurant call tasks</label><input type="number" id="restaurant-tasks" min="0" max="1000" step="1"></div>
+        <div id="callback-field"></div>
+      </div>
+      <div id="task-check" aria-live="polite"></div>
+    </div>
 
     <div class="day-grid">
       <div>
@@ -92,14 +103,7 @@
           <ul class="items" id="items" aria-label="Today's meetings"></ul>
         </div>
 
-        <div class="panel">
-          <h3>Your numbers</h3>
-          <label for="callbacks-due">Callbacks due today</label>
-          <input type="number" id="callbacks-due" min="0" max="200" step="1">
-          <label for="dial-target">Dials I want to make today</label>
-          <input type="number" id="dial-target" min="0" max="1000" step="5">
-          <button class="btn" id="clear-day" type="button" style="margin-top:16px">Clear my day</button>
-        </div>
+        <button class="btn" id="clear-day" type="button">Clear this day</button>
 
       </div>
 
@@ -107,7 +111,6 @@
         <div class="changes" id="today" aria-live="polite"></div>
         <div class="legend" id="legend"></div>
         <div class="calendar" id="calendar"></div>
-        <div class="results" id="results" aria-live="polite"></div>
       </div>
     </div>
   </div>

@@ -379,7 +379,7 @@
     var ownBlock = !isReminder && !L.externalGuests(ev).length && L.hasWord(titled, C.callBlockWords);
     if (((ev.description || "").indexOf(C.calendarBlockTag) >= 0 || ownBlock) && ev.start && ev.start.dateTime) {
       var ba = L.tzParts(new Date(ev.start.dateTime)), bb = L.tzParts(new Date(ev.end.dateTime));
-      return { block: { date: ba.ymd, start: ba.min, end: bb.ymd === ba.ymd ? bb.min : 24 * 60 } };
+      return { block: { date: ba.ymd, start: ba.min, end: bb.ymd === ba.ymd ? bb.min : 24 * 60, kind: L.blockKind(titled) } };
     }
     if (!ev.start || !ev.start.dateTime) {
       return { allDay: true, label: ev.summary || "All-day event", date: ev.start && ev.start.date, outOfOffice: ev.eventType === "outOfOffice" };
@@ -421,6 +421,34 @@
     if (!L.externalGuests(ev).length && L.hasWord(t, R.callbackWords)) return true;
     if (!others.length && L.hasWord(t, R.callWords)) return true;
     return false;
+  };
+
+  // What kind of calling time a calendar block is, from its title.
+  L.blockKind = function (label) {
+    var t = L.norm(label);
+    if (/\b(practice|bot|clean leads|leads|wrap up|prep)\b/.test(t) && !/\bcall/.test(t.replace(/cold call bot/, ""))) return "other";
+    if (/\bmobile/.test(t)) return "mobile";
+    if (/\brestaurant/.test(t)) return "restaurant";
+    return "flex";   // callback blocks and a rep's own "Call block": any kind of call
+  };
+  // Tasks vs. calling time. cap = minutes of { mobile, restaurant, flex } calling time.
+  L.taskCheck = function (o) {
+    var dph = C.dialsPerHour, r = C.bookingRatePerDial;
+    var capM = o.cap.mobile / 60 * dph, capR = o.cap.restaurant / 60 * dph, flex = o.cap.flex / 60 * dph;
+    var mFit = Math.min(o.mobileTasks, capM), rFit = Math.min(o.restaurantTasks, capR);
+    var mFlex = Math.min(o.mobileTasks - mFit, flex); flex -= mFlex;
+    var rFlex = Math.min(o.restaurantTasks - rFit, flex); flex -= rFlex;
+    var mDone = mFit + mFlex, rDone = rFit + rFlex;
+    var spare = (capM - mFit) + (capR - rFit) + flex;
+    return {
+      mobile: { tasks: o.mobileTasks, capacity: Math.floor(capM), done: Math.floor(mDone), short: Math.ceil(o.mobileTasks - mDone) },
+      restaurant: { tasks: o.restaurantTasks, capacity: Math.floor(capR), done: Math.floor(rDone), short: Math.ceil(o.restaurantTasks - rDone) },
+      flexCapacity: Math.floor(o.cap.flex / 60 * dph),
+      callbacks: o.callbacks,
+      dials: Math.round(mDone + rDone + o.callbacks),
+      idleMinutes: Math.floor(spare / dph * 60),
+      expected: mDone * r.mobileBlock + rDone * r.restaurantBlock + o.callbacks * r.callback
+    };
   };
 
   // ---------- Suggestions ----------
@@ -955,7 +983,10 @@
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked */ } }
   function dayData(d) {
     d = d || state.day;
-    if (!state.days[d]) state.days[d] = { items: [], callbacksDue: 0, dialTarget: C.defaultDialTarget };
+    if (!state.days[d]) state.days[d] = { items: [], callbacksDue: 0, mobileTasks: 0, restaurantTasks: 0 };
+    var x = state.days[d];
+    if (x.mobileTasks == null) x.mobileTasks = 0;
+    if (x.restaurantTasks == null) x.restaurantTasks = 0;
     return state.days[d];
   }
   var DAYS = ["", "Mon", "Tue", "Wed", "Thu", "Fri"];
@@ -982,6 +1013,16 @@
   function addLink(text, href, label) {
     return el("a", { class: "cal-add", href: href, target: "_blank", rel: "noopener", "aria-label": label, text: text });
   }
+  function blockLinkEl(b) {
+    var bt = C.blockTypes[b.type];
+    if (blockOnCal(state.day, b)) return el("span", { class: "cal-add on", text: "\u2713 On calendar" });
+    var who = L.whoLine(b);
+    return addLink("+ Calendar", L.gcalLink({
+      ymd: dayYmd(state.day), start: b.start, end: b.end,
+      title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
+      details: [who, bt.why, "", C.calendarBlockTag].join("\n")
+    }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
+  }
   function setIgnored(it, on) {
     if (it.source === "calendar") {
       var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
@@ -995,7 +1036,8 @@
     var dd = dayData(d);
     var useCal = !ymd || !calFresh() || state.cal.week[d] === ymd;
     var plan = L.buildDay({ day: d, items: useCal ? allItems(d) : dd.items, });
-    return { plan: plan, est: L.estimate(plan, dd.callbacksDue, dd.dialTarget), target: dd.dialTarget };
+    var tasks = dd.mobileTasks + dd.restaurantTasks;
+    return { plan: plan, est: L.estimate(plan, 0, tasks), target: tasks };
   }
 
   function renderDayToggle() {
@@ -1073,15 +1115,7 @@
         var bt = C.blockTypes[b.type];
         title = bt.label + (b.moved ? " (moved)" : "");
         why = bt.why; who = L.whoLine(b);
-        var addEl = null;
-        if (bt.dials || b.type === "practice" || b.type === "leads") {
-          if (blockOnCal(state.day, b)) addEl = el("span", { class: "cal-add on", text: "\u2713 On calendar" });
-          else addEl = addLink("+ Calendar", L.gcalLink({
-            ymd: dayYmd(state.day), start: b.start, end: b.end,
-            title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
-            details: [who, bt.why, "", C.calendarBlockTag].filter(function (x) { return x != null; }).join("\n")
-          }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
-        }
+        var addEl = (bt.dials || b.type === "practice" || b.type === "leads") ? blockLinkEl(b) : null;
         li.appendChild(el("div", { class: "b-title" }, [addEl, title, el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
         if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who }));
         if (h >= 88) li.appendChild(el("div", { class: "b-why", text: why }));
@@ -1122,19 +1156,95 @@
     return msgs;
   }
 
-  function renderResults(cur) {
-    var plan = cur.plan, est = cur.est, dd = dayData();
-    var box = $("results"); box.innerHTML = "";
-    box.appendChild(el("h3", { style: "margin-top:0;font-family:var(--serif);font-size:1.2rem", text: "What your dials should get you" }));
-    box.appendChild(el("div", { class: "big", text: est.expected.toFixed(1) }));
-    var whole = Math.round(est.expected);
-    box.appendChild(el("p", { class: "sentence", text: whole === 0 ? "Expected meetings today. That's less than one, so lean on your callbacks."
-      : "Expected meetings today. On a typical day that's about " + whole + (whole === 1 ? " meeting" : " meetings") + ", and some days " + (whole + 1) + " or more." }));
-    var dials = Math.round(Math.min(dd.dialTarget, est.capacity));
-    var focusMin = Math.round(dials / C.dialsPerHour * 60 / 5) * 5;
-    if (focusMin > 0) box.appendChild(el("p", { class: "sentence", text: dials + " dials at " + C.dialsPerHour + " an hour is about " + L.dur(focusMin) + " of focused dialing. The calendar shows when to call which numbers." }));
-    if (est.overCapacity) box.appendChild(el("div", { class: "warn", text: "You have room for about " + est.capacity + " dials today. Expected meetings are based on " + est.capacity + "." }));
-    box.appendChild(el("p", { class: "nudge", text: "Each callback dial is worth about 4 cold dials. Don't skip them." }));
+  function callbackCount() {
+    if (calFresh()) return allItems().filter(function (it) { return it.type === "callback"; }).length;
+    return dayData().callbacksDue + dayData().items.filter(function (it) { return it.type === "callback" && !it.ignored; }).length;
+  }
+  // Minutes of calling time by kind: from blocks on the calendar, or from the plan if not connected.
+  function capacity(cur) {
+    var cap = { mobile: 0, restaurant: 0, flex: 0 };
+    if (calFresh()) {
+      ((state.cal.blocks || {})[state.day] || []).forEach(function (b) {
+        var k = b.kind || "flex"; if (k === "other") return;
+        cap[k] += Math.max(0, b.end - b.start);
+      });
+      return { cap: cap, source: "calendar" };
+    }
+    L.blocks(cur.plan).forEach(function (b) {
+      var m = b.end - b.start;
+      if (b.type === "mobile") cap.mobile += m;
+      else if (b.type === "restaurant" || b.type === "prime") cap.restaurant += m;
+      else if (b.type === "callbacks" || b.type === "sweep") cap.flex += m;
+    });
+    return { cap: cap, source: "plan" };
+  }
+  function renderTaskCheck(cur) {
+    var dd = dayData(), box = $("task-check"); box.innerHTML = "";
+    var cf = $("callback-field"); cf.innerHTML = "";
+    var cbs = callbackCount();
+    if (calFresh()) {
+      cf.appendChild(el("span", { class: "label-like", style: "font-weight:600;font-size:0.93rem;display:block;margin:12px 0 4px", text: "Callback tasks" }));
+      cf.appendChild(el("div", { class: "auto", text: String(cbs) }));
+      cf.appendChild(el("p", { class: "hint", text: "From your calendar" }));
+    } else {
+      var inp = el("input", { type: "number", id: "callbacks-due", min: "0", max: "200", step: "1", value: String(dd.callbacksDue) });
+      inp.addEventListener("input", function () { dd.callbacksDue = Math.max(0, Number(inp.value) || 0); save(); renderDay(); var n = $("callbacks-due"); if (n) { n.focus(); n.setSelectionRange && n.type === "text" && n.setSelectionRange(99, 99); } });
+      cf.appendChild(el("label", { for: "callbacks-due", text: "Callback tasks" }));
+      cf.appendChild(inp);
+      cf.appendChild(el("p", { class: "hint", text: "Connect your calendar to count these automatically." }));
+    }
+    var c = capacity(cur);
+    var chk = L.taskCheck({ mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: cbs, cap: c.cap });
+    var total = dd.mobileTasks + dd.restaurantTasks + cbs;
+    if (!total) { box.appendChild(el("p", { class: "hint", text: "Enter your call tasks to check them against " + (c.source === "calendar" ? "the calling time on your calendar." : "today's plan.") + " Team target: " + C.defaultDialTarget + " dials a day." })); return; }
+
+    var src = c.source === "calendar" ? "Calling time on your calendar" : "Calling time in today's plan";
+    function row(label, r, minutes) {
+      return el("tr", null, [el("td", { text: label }), el("td", { class: "num", text: String(r.tasks) }), el("td", { class: "num", text: minutes ? L.dur(minutes) : "None" }),
+        el("td", { class: "num", text: String(r.capacity) }),
+        el("td", { class: r.short > 0 ? "bad" : "ok", text: r.short > 0 ? r.short + " won't fit" : "Fits" })]);
+    }
+    var tb = el("tbody", null, [row("Mobile", chk.mobile, c.cap.mobile), row("Restaurant", chk.restaurant, c.cap.restaurant)]);
+    if (c.cap.flex) tb.appendChild(el("tr", null, [el("td", { text: "Callback and general call blocks" }), el("td", { class: "num", text: "\u2014" }), el("td", { class: "num", text: L.dur(c.cap.flex) }), el("td", { class: "num", text: String(chk.flexCapacity) }), el("td", { class: "hint", text: "Covers overflow from either" })]));
+    tb.appendChild(el("tr", null, [el("td", { text: "Callbacks" }), el("td", { class: "num", text: String(cbs) }), el("td", { class: "num", text: "At their own times" }), el("td", { class: "num", text: String(cbs) }), el("td", { class: "ok", text: cbs ? "Fits" : "\u2014" })]));
+    box.appendChild(el("div", { class: "table-scroll", style: "margin-top:14px" }, [el("table", { class: "check-table" }, [
+      el("thead", null, [el("tr", null, [el("th", { text: "Call tasks" }), el("th", { class: "num", text: "Tasks" }), el("th", { class: "num", text: src }), el("th", { class: "num", text: "Can dial" }), el("th", { text: "" })])]), tb])]));
+
+    var shortTotal = Math.max(0, chk.mobile.short) + Math.max(0, chk.restaurant.short);
+    if (shortTotal > 0) {
+      var needMin = Math.ceil(shortTotal / C.dialsPerHour * 60 / 15) * 15;
+      var v = el("div", { class: "verdict short", text: "You won't get through " + shortTotal + " of your tasks. " + (c.source === "calendar"
+        ? "Add about " + L.dur(needMin) + " of calling time to your calendar, then click Refresh."
+        : "Today's plan only has room for about " + chk.dials + " dials. Move a meeting or carry the rest to tomorrow.") });
+      box.appendChild(v);
+      if (c.source === "calendar") {
+        var want = [];
+        if (chk.mobile.short > 0) want.push("mobile");
+        if (chk.restaurant.short > 0) want.push("restaurant", "prime");
+        var cands = L.blocks(cur.plan).filter(function (b) { return want.indexOf(b.type) >= 0 && !blockOnCal(state.day, b); });
+        if (cands.length) {
+          box.appendChild(el("p", { style: "margin:8px 0 0", text: "From today's plan:" }));
+          var ul = el("ul", { class: "add-list" });
+          cands.forEach(function (b) { ul.appendChild(el("li", null, [C.blockTypes[b.type].label + " " + L.fmtRange(b.start, b.end), blockLinkEl(b)])); });
+          box.appendChild(ul);
+        }
+      }
+    } else if (chk.idleMinutes >= 15) {
+      var idle = L.dur(Math.floor(chk.idleMinutes / 5) * 5);
+      box.appendChild(el("div", { class: "verdict idle", text: c.source === "calendar"
+        ? "You'll have about " + idle + " of calling time on your calendar with nothing to call. Pull more call tasks, or use the time to clean leads."
+        : "Today's plan has about " + idle + " more calling time than your tasks need. Only book the blocks you need, or pull more call tasks." }));
+    } else {
+      box.appendChild(el("div", { class: "verdict good", text: "Your " + (c.source === "calendar" ? "calendar" : "plan") + " fits today's call tasks." }));
+    }
+    if (c.source === "plan") box.appendChild(el("p", { class: "hint", text: "This assumes you follow today's plan. Connect your calendar to check against the calling blocks you've actually booked." }));
+
+    var focusMin = Math.round(chk.dials / C.dialsPerHour * 60 / 5) * 5;
+    box.appendChild(el("div", { class: "task-summary" }, [
+      el("div", null, [el("div", { class: "big", text: chk.expected.toFixed(1) }), el("div", { class: "hint", text: "expected meetings" })]),
+      el("div", null, [el("div", { class: "big", text: String(chk.dials) }), el("div", { class: "hint", text: "dials (team target " + C.defaultDialTarget + ")" })]),
+      el("div", null, [el("div", { class: "big", text: L.dur(focusMin).replace(" hours", "h").replace(" hour", "h").replace(" minutes", "m") }), el("div", { class: "hint", text: "of focused dialing at " + C.dialsPerHour + " an hour" })])
+    ]));
   }
 
   function renderToday(cur) {
@@ -1247,13 +1357,13 @@
   function renderDay() {
     renderDayToggle();
     var dd = dayData();
-    $("callbacks-due").value = dd.callbacksDue;
-    $("dial-target").value = dd.dialTarget;
+    if (document.activeElement !== $("mobile-tasks")) $("mobile-tasks").value = dd.mobileTasks || "";
+    if (document.activeElement !== $("restaurant-tasks")) $("restaurant-tasks").value = dd.restaurantTasks || "";
     renderItems();
     var cur = planFor(state.day);
     renderCalendar(cur.plan);
     renderToday(cur);
-    renderResults(cur);
+    renderTaskCheck(cur);
     renderCalBox();
   }
 
@@ -1270,10 +1380,10 @@
       dayData().items.push({ start: start, end: end, label: label || (type === "callback" ? "Callback" : "Meeting"), type: type });
       save(); $("add-label").value = ""; renderDay();
     });
-    $("callbacks-due").addEventListener("input", function () { dayData().callbacksDue = Math.max(0, Number(this.value) || 0); save(); renderDay(); this.focus(); });
-    $("dial-target").addEventListener("input", function () { dayData().dialTarget = Math.max(0, Number(this.value) || 0); save(); renderDay(); this.focus(); });
+    $("mobile-tasks").addEventListener("input", function () { dayData().mobileTasks = Math.max(0, Number(this.value) || 0); save(); renderDay(); });
+    $("restaurant-tasks").addEventListener("input", function () { dayData().restaurantTasks = Math.max(0, Number(this.value) || 0); save(); renderDay(); });
     $("clear-day").addEventListener("click", function () {
-      if (!confirm("Clear the meetings you added and your numbers for " + DAYS[state.day] + "?")) return;
+      if (!confirm("Clear the meetings you added and your call tasks for " + DAYS[state.day] + "?")) return;
       delete state.days[state.day]; save(); renderDay();
     });
     renderDay();

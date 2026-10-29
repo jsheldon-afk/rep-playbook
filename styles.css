@@ -170,6 +170,22 @@ input[type="number"], input[type="time"], input[type="text"], select, .row { dis
 .errors { list-style: none; padding: 0; margin: 8px 0 0; }
 .errors li { background: var(--red-bg); color: var(--red); border-radius: var(--radius-sm); padding: 8px 10px; margin: 6px 0; font-size: 0.9rem; }
 
+.tasks { border: 2px solid var(--ink); }
+.task-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.task-inputs .auto { font-family: var(--serif); font-size: 1.6rem; font-weight: 600; margin-top: 2px; }
+.check-table td.num, .check-table th.num { text-align: right; }
+.check-table .bad { color: var(--red); font-weight: 600; }
+.check-table .ok { color: var(--green); font-weight: 600; }
+.verdict { border-radius: var(--radius-sm); padding: 12px 16px; margin: 14px 0 6px; font-weight: 600; }
+.verdict.short { background: var(--red-bg); color: var(--red); }
+.verdict.idle { background: var(--warn-bg); }
+.verdict.good { background: var(--green-bg); color: var(--green); }
+.task-summary { display: flex; flex-wrap: wrap; gap: 24px; align-items: baseline; margin-top: 14px; }
+.task-summary .big { font-family: var(--serif); font-size: 2.4rem; font-weight: 600; line-height: 1; }
+.add-list { margin: 6px 0 0; padding-left: 1.2em; }
+.add-list li { margin: 4px 0; }
+.add-list .cal-add { float: none; margin-left: 6px; }
+@media (max-width: 700px) { .task-inputs { grid-template-columns: 1fr; } }
 .changes { background: var(--surface); border-radius: var(--radius-sm); padding: 14px 18px; margin-bottom: 18px; }
 .changes h3 { margin: 0 0 6px; font-size: 1rem; }
 .changes ul { margin: 0; padding-left: 1.2em; }
