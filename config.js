@@ -184,20 +184,22 @@ window.CONFIG = {
   ],
 
   // ---------- Daily templates (times in ET) ----------
-  // type: prep | practice | callbacks | mobile | restaurant | prime | sweep | lunch | leads | wrap
+  // type: prep | practice | callbacks | mobile | restaurant | prime | sweep | lunch | break | leads | wrap
   // Non-calling time: meetings (from the calendar), demo prep, day organization prep,
-  // cold call bot practice (30 minutes, everyone, every day) and cleaning leads.
+  // cold call bot practice (30 minutes, everyone, every day), cleaning leads,
+  // a 45-minute lunch and two 15-minute afternoon breaks.
   defaultDay: [
     { start: "09:00", end: "09:30", type: "prep" },
     { start: "09:30", end: "10:00", type: "practice" },
     { start: "10:00", end: "10:30", type: "callbacks" },
     { start: "10:30", end: "12:30", type: "mobile" },
-    { start: "12:30", end: "13:00", type: "lunch" },
-    { start: "13:00", end: "14:00", type: "restaurant" },
-    { start: "14:00", end: "15:00", type: "mobile" },
+    { start: "12:30", end: "13:15", type: "lunch" },
+    { start: "13:15", end: "14:00", type: "restaurant" },
+    { start: "14:00", end: "14:45", type: "mobile" },
+    { start: "14:45", end: "15:00", type: "break" },
     { start: "15:00", end: "15:30", type: "sweep" },
     { start: "15:30", end: "17:00", type: "prime" },
-    { start: "17:00", end: "17:15", type: "restaurant" },
+    { start: "17:00", end: "17:15", type: "break" },
     { start: "17:15", end: "17:45", type: "leads" },
     { start: "17:45", end: "18:00", type: "wrap" }
   ],
@@ -207,12 +209,13 @@ window.CONFIG = {
     { start: "09:30", end: "10:00", type: "practice" },
     { start: "10:00", end: "10:30", type: "callbacks" },
     { start: "10:30", end: "12:30", type: "mobile" },
-    { start: "12:30", end: "13:00", type: "lunch" },
-    { start: "13:00", end: "14:30", type: "restaurant" },
-    { start: "14:30", end: "15:00", type: "mobile" },
+    { start: "12:30", end: "13:15", type: "lunch" },
+    { start: "13:15", end: "14:30", type: "restaurant" },
+    { start: "14:30", end: "14:45", type: "mobile" },
+    { start: "14:45", end: "15:00", type: "break" },
     { start: "15:00", end: "15:30", type: "sweep" },
     { start: "15:30", end: "17:00", type: "prime" },
-    { start: "17:00", end: "17:15", type: "restaurant" },
+    { start: "17:00", end: "17:15", type: "break" },
     { start: "17:15", end: "17:45", type: "leads" },
     { start: "17:45", end: "18:00", type: "wrap" }
   ],
@@ -226,7 +229,8 @@ window.CONFIG = {
     restaurant: { label: "Restaurant block", dials: true, rate: "restaurantBlock", why: "Restaurant lines work in the afternoon, after the lunch rush." },
     prime:      { label: "Restaurant prime time", dials: true, rate: "restaurantPrime", why: "The best restaurant-line window of the day." },
     sweep:      { label: "Callback sweep", dials: true, rate: "callback", why: "Call back everyone who asked today. Same-day follow-up converts best." },
-    lunch:      { label: "Lunch", dials: false, why: "Restaurants are mid-rush. Take your break." },
+    lunch:      { label: "Lunch", dials: false, why: "Restaurants are mid-rush. Take your lunch." },
+    break:      { label: "Break", dials: false, why: "15 minutes away from the phone." },
     wrap:       { label: "Wrap-up", dials: false, why: "Check every call has the right disposition and sentiment. Set tomorrow's Nooks reminders." }
   },
 
@@ -236,7 +240,8 @@ window.CONFIG = {
     afternoonSweepWindow: ["14:30", "17:00"],
     lunchWindow: ["11:30", "14:00"],
     minCallbackMinutes: 30,
-    lunchMinutes: 30,
+    lunchMinutes: 45,
+    breakWindow: ["13:00", "17:45"],      // where a break can move if a meeting covers it
     practiceMinutes: 30,                  // required every day
     practiceWindow: ["09:00", "17:00"]    // where practice can move if a meeting covers it
   }

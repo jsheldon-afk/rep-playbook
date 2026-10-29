@@ -210,6 +210,7 @@ input[type="number"], input[type="time"], input[type="text"], select, .row { dis
 .t-mobile { background: var(--blue-bg); border-color: var(--blue); }
 .t-restaurant { background: var(--amber-bg); border-color: #c98314; }
 .t-prime { background: var(--prime-bg); border-color: #b06f05; }
+.t-break { background: var(--grey-bg); border-color: #a3a3ad; }
 .t-lunch { background: var(--grey-bg); border-color: #a3a3ad; }
 .t-wrap { background: var(--lav-bg); border-color: #8c7fa3; }
 .t-fixed { background: repeating-linear-gradient(135deg, #e7e7ea 0, #e7e7ea 6px, #dedee2 6px, #dedee2 12px); border-color: #6b6b75; }

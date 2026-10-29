@@ -47,7 +47,7 @@
   };
 
   // ---------- Day builder ----------
-  var PRIORITY = { prep: 1, wrap: 1, leads: 1, mobile: 2, restaurant: 3, prime: 5, lunch: 6, practice: 6, callbacks: 7, sweep: 7 };
+  var PRIORITY = { prep: 1, wrap: 1, leads: 1, break: 6, mobile: 2, restaurant: 3, prime: 5, lunch: 6, practice: 6, callbacks: 7, sweep: 7 };
 
   L.buildDay = function (opts) {
     var day = opts.day; // 1 = Mon ... 5 = Fri
@@ -130,8 +130,19 @@
     }
     if (lostSlots("lunch")) {
       var ok3 = ensure("lunch", lunchNeed, L.toMin(R.lunchWindow[0]), L.toMin(R.lunchWindow[1]), ["mobile", "restaurant"]);
-      if (!ok3) notes.push("There's no free half hour for lunch between 11:30 and 2:00. Take a break where you can.");
+      if (!ok3) notes.push("There's no free " + R.lunchMinutes + " minutes for lunch between 11:30 and 2:00. Eat when you can.");
     }
+    // Breaks: each covered break moves to the nearest free calling slot in the afternoon.
+    var bw0 = L.toMin(R.breakWindow[0]), bw1 = L.toMin(R.breakWindow[1]), lostBreaks = 0;
+    slots.forEach(function (s) {
+      if (s.base !== "break" || !s.fixed) return;
+      var cand = slots.filter(function (x) {
+        return free(x) && (x.type === "mobile" || x.type === "restaurant" || x.type === "prime") && x.start >= bw0 && x.start < bw1 &&
+          !slots.some(function (y) { return y.type === "break" && Math.abs(y.start - x.start) < 60; });   // keep breaks an hour apart
+      }).sort(function (a, b) { return Math.abs(a.start - s.start) - Math.abs(b.start - s.start) || (PRIORITY[a.type] - PRIORITY[b.type]); })[0];
+      if (cand) { cand.type = "break"; cand.moved = true; } else lostBreaks++;
+    });
+    if (lostBreaks) notes.push("Meetings took " + (lostBreaks === 1 ? "one of your breaks" : "both of your breaks") + ". Step away for 15 minutes between meetings if you can.");
     // Cold call bot practice is required: if a meeting covers it, move it, nearest first.
     if (lostSlots("practice")) {
       var ok4 = ensure("practice", R.practiceMinutes / step, L.toMin(R.practiceWindow[0]), L.toMin(R.practiceWindow[1]), ["mobile", "restaurant"]);
@@ -172,14 +183,26 @@
   };
 
   // Group slots into calendar blocks.
+  // Group slots into calendar blocks. Same type in a row = one block, even when the
+  // time zones being called change partway through; whoLine explains when each zone starts.
   L.blocks = function (plan) {
     var out = [];
     plan.slots.forEach(function (s) {
-      var zones = s.fixed ? [] : L.zonesFor(s.type === "prime" ? "prime" : s.type, s.start).map(function (z) { return z.name; });
-      var key = s.fixed ? "fixed:" + s.fixed.kind + ":" + s.fixed.idx : s.type + "|" + s.moved + "|" + zones.join(",");
+      // Mobile and restaurant time always merges; for other blocks, "(moved)" starts a new block.
+      var key = s.fixed ? "fixed:" + s.fixed.kind + ":" + s.fixed.idx : s.type + ((s.type === "mobile" || s.type === "restaurant") ? "" : "|" + s.moved);
       var last = out[out.length - 1];
-      if (last && last.key === key && last.end === s.start) { last.end = s.end; }
-      else out.push({ key: key, start: s.start, end: s.end, type: s.fixed ? "fixed" : s.type, fixed: s.fixed, moved: s.moved, base: s.base, zones: zones });
+      var b;
+      if (last && last.key === key && last.end === s.start) { b = last; b.end = s.end; b.moved = b.moved || s.moved; }
+      else { b = { key: key, start: s.start, end: s.end, type: s.fixed ? "fixed" : s.type, fixed: s.fixed, moved: s.moved, base: s.base, zones: [], zoneRanges: {} }; out.push(b); }
+      if (s.fixed) return;
+      L.zonesFor(s.type === "prime" ? "prime" : s.type, s.start).forEach(function (z) {
+        var r = b.zoneRanges[z.name];
+        if (!r) { b.zoneRanges[z.name] = [s.start, s.end]; b.zones.push(z.name); }
+        else r[1] = s.end;
+      });
+    });
+    out.forEach(function (b) {
+      b.zones = C.zones.map(function (z) { return z.name; }).filter(function (n) { return b.zones.indexOf(n) >= 0; });
     });
     return out;
   };
@@ -189,7 +212,12 @@
     if (!names.length) return "";
     var zs = C.zones.filter(function (z) { return names.indexOf(z.name) >= 0; });
     var parts = zs.map(function (z) {
-      return z.name + " " + L.fmtRange(L.local(b.start, z), L.local(b.end, z)) + " local";
+      var r = (b.zoneRanges && b.zoneRanges[z.name]) || [b.start, b.end];
+      var txt = z.name + " " + L.fmtRange(L.local(r[0], z), L.local(r[1], z)) + " local";
+      if (r[0] > b.start && r[1] < b.end) txt += " (" + L.fmtRange(r[0], r[1]) + " ET)";
+      else if (r[0] > b.start) txt += " (from " + L.fmt(r[0]) + " ET)";
+      else if (r[1] < b.end) txt += " (until " + L.fmt(r[1]) + " ET)";
+      return txt;
     });
     var what = t === "mobile" ? "mobiles" : (t === "restaurant" || t === "prime") ? "restaurants" : "owners";
     var lunchy = (t === "callbacks" || t === "sweep") ? zs.filter(function (z) { return inWin(L.local(b.start, z), W.lunchRush); }) : [];
@@ -344,7 +372,6 @@
   L.eventToItem = function (ev) {
     if (!ev || ev.status === "cancelled") return { skip: "cancelled" };
     if (ev.eventType === "workingLocation") return { skip: "location" };
-    if (ev.transparency === "transparent") return { skip: "free" };
     var me = (ev.attendees || []).filter(function (a) { return a.self; })[0];
     if (me && me.responseStatus === "declined") return { skip: "declined" };
     var titled = ev.summary || "";
@@ -362,6 +389,8 @@
     if (end <= a.min) return { skip: "zero-length" };
     var label = ev.summary || (ev.eventType === "outOfOffice" ? "Out of office" : "Busy");
     var type = L.isCallbackEvent(ev, label) ? "callback" : "meeting";
+    // Events marked "free" don't block time, except callbacks (Nooks marks its reminders free).
+    if (ev.transparency === "transparent" && type !== "callback") return { skip: "free" };
     var demo = type === "meeting" && L.externalGuests(ev).length > 0 && !L.hasWord(label, C.skipWords);
     return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo, link: ev.htmlLink || null } };
   };
@@ -1065,7 +1094,7 @@
 
   function renderLegend() {
     var lg = $("legend"); lg.innerHTML = "";
-    ["prep", "practice", "callbacks", "mobile", "restaurant", "prime", "sweep", "lunch", "leads", "wrap"].forEach(function (t) {
+    ["prep", "practice", "callbacks", "mobile", "restaurant", "prime", "sweep", "lunch", "break", "leads", "wrap"].forEach(function (t) {
       lg.appendChild(el("span", null, [el("i", { class: "t-" + t }), C.blockTypes[t].label]));
     });
     lg.appendChild(el("span", null, [el("i", { class: "t-fixed" }), "Meetings and agreed callbacks (fixed)"]));
