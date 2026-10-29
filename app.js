@@ -339,6 +339,10 @@
     if (ev.transparency === "transparent") return { skip: "free" };
     var me = (ev.attendees || []).filter(function (a) { return a.self; })[0];
     if (me && me.responseStatus === "declined") return { skip: "declined" };
+    if ((ev.description || "").indexOf(C.calendarBlockTag) >= 0 && ev.start && ev.start.dateTime) {
+      var ba = L.tzParts(new Date(ev.start.dateTime)), bb = L.tzParts(new Date(ev.end.dateTime));
+      return { block: { date: ba.ymd, start: ba.min, end: bb.ymd === ba.ymd ? bb.min : 24 * 60 } };
+    }
     if (!ev.start || !ev.start.dateTime) {
       return { allDay: true, label: ev.summary || "All-day event", date: ev.start && ev.start.date, outOfOffice: ev.eventType === "outOfOffice" };
     }
@@ -348,7 +352,22 @@
     var label = ev.summary || (ev.eventType === "outOfOffice" ? "Out of office" : "Busy");
     var type = /call\s?back/i.test(label) ? "callback" : "meeting";
     var demo = L.externalGuests(ev).length > 0 && !L.hasWord(label, C.skipWords);
-    return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo } };
+    return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo, link: ev.htmlLink || null } };
+  };
+
+  // Google Calendar "add event" link. ymd = YYYY-MM-DD, start/end = minutes in the rep's time zone.
+  L.gcalLink = function (o) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    function f(min) { return o.ymd.replace(/-/g, "") + "T" + p(Math.floor(min / 60)) + p(min % 60) + "00"; }
+    return "https://calendar.google.com/calendar/render?action=TEMPLATE" +
+      "&text=" + encodeURIComponent(o.title) +
+      "&dates=" + f(o.start) + "/" + f(o.end) +
+      "&details=" + encodeURIComponent(o.details || "") +
+      "&ctz=" + encodeURIComponent(C.repTimeZone);
+  };
+  L.ymdLocal = function (d) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   };
 
   // ---------- Suggestions ----------
@@ -359,7 +378,7 @@
     // 1) Protect prime time
     items.forEach(function (it) {
       if (it.type !== "meeting" || L.isDemo(it)) return;
-      if (it.start < p1 && it.end > p0) out.push({ kind: "prime", text: q2(it.label) + " (" + L.fmtRange(it.start, it.end) + ") sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM." });
+      if (it.start < p1 && it.end > p0) out.push({ kind: "prime", item: it, text: q2(it.label) + " (" + L.fmtRange(it.start, it.end) + ") sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM." });
     });
     // 2) Demo spacing
     var sorted = items.slice().sort(function (a, b) { return a.start - b.start; });
@@ -655,15 +674,25 @@
       if (i === 1 && v.kind === "callbackTime") when = "At the time they gave you";
       else if (done === 0) when = L.fmtDate(L.addBusinessDays(today, days[i - 1])) + " (business day " + days[i - 1] + ")";
       else when = "Business day " + days[i - 1] + " after your talk";
+      var link = null;
+      if (done === 0 && w && !(i === 1 && v.kind === "callbackTime")) {
+        var line = v.line === "mobile" ? "mobile" : "restaurant line";
+        link = addLink("+ Calendar", L.gcalLink({
+          ymd: L.ymdLocal(L.addBusinessDays(today, days[i - 1])), start: w.etStart, end: w.etStart + 15,
+          title: "Callback " + i + " of " + C.callbackDials + " (" + zone.name + ", " + line + ")",
+          details: "Owner asked for a callback. Call their " + line + " between " + L.windowText(w, zone) + ".\nAdd the restaurant name to this title, and set the Nooks reminder too."
+        }), "Add callback " + i + " to Google Calendar");
+      }
       var tr = el("tr", null, [
         el("td", { text: "Callback " + i + (i <= done ? " (done)" : i === n ? " (next)" : "") }),
         el("td", { text: when }),
-        el("td", { text: (i === 1 && v.kind === "callbackTime") ? "Their time, converted to ET" : (w ? w.part + ": " + L.windowText(w, zone) : "\u2014") })
+        el("td", { text: (i === 1 && v.kind === "callbackTime") ? "Their time, converted to ET" : (w ? w.part + ": " + L.windowText(w, zone) : "\u2014") }),
+        el("td", null, [link])
       ]);
       if (i === n) tr.querySelectorAll("td").forEach(function (td) { td.className = "now"; });
       rows.appendChild(tr);
     }
-    return el("div", { class: "table-scroll plan-table" }, [el("table", null, [el("thead", null, [el("tr", null, [el("th", { text: "Callback" }), el("th", { text: "When" }), el("th", { text: "Call between" })])]), rows])]);
+    return el("div", { class: "table-scroll plan-table" }, [el("table", null, [el("thead", null, [el("tr", null, [el("th", { text: "Callback" }), el("th", { text: "When" }), el("th", { text: "Call between" }), el("th", { text: "" })])]), rows])]);
   }
 
   var SIM = {
@@ -891,6 +920,15 @@
   function listItems(d) { d = d || state.day; return dayData(d).items.concat(calItems(d)); }
   // Only the meetings that block time.
   function allItems(d) { return listItems(d).filter(function (it) { return !it.ignored; }); }
+  // The real date of a weekday (1-5) in the week being planned.
+  function dayYmd(d) { return calFresh() ? state.cal.week[d] : L.planWeek(new Date())[d]; }
+  function blockOnCal(d, b) {
+    if (!calFresh()) return false;
+    return ((state.cal.blocks || {})[d] || []).some(function (x) { return x.start <= b.start && x.end >= b.end; });
+  }
+  function addLink(text, href, label) {
+    return el("a", { class: "cal-add", href: href, target: "_blank", rel: "noopener", "aria-label": label, text: text });
+  }
   function setIgnored(it, on) {
     if (it.source === "calendar") {
       var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
@@ -982,7 +1020,16 @@
         var bt = C.blockTypes[b.type];
         title = bt.label + (b.moved ? " (moved)" : "");
         why = bt.why; who = L.whoLine(b);
-        li.appendChild(el("div", { class: "b-title" }, [title, el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
+        var addEl = null;
+        if (bt.dials) {
+          if (blockOnCal(state.day, b)) addEl = el("span", { class: "cal-add on", text: "\u2713 On calendar" });
+          else addEl = addLink("+ Calendar", L.gcalLink({
+            ymd: dayYmd(state.day), start: b.start, end: b.end,
+            title: "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : ""),
+            details: [who, bt.why, "", C.calendarBlockTag].filter(function (x) { return x != null; }).join("\n")
+          }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
+        }
+        li.appendChild(el("div", { class: "b-title" }, [addEl, title, el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
         if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who }));
         if (h >= 88) li.appendChild(el("div", { class: "b-why", text: why }));
         li.setAttribute("title", [title, L.fmtRange(b.start, b.end) + " ET", who, why].filter(Boolean).join("\n"));
@@ -1039,16 +1086,20 @@
 
   function renderToday(cur) {
     var box = $("today"); box.innerHTML = "";
-    var tips = L.suggest({ plan: cur.plan, est: cur.est, items: allItems(), day: state.day }).map(function (x) { return x.text; });
+    var tips = L.suggest({ plan: cur.plan, est: cur.est, items: allItems(), day: state.day });
     var allDay = calFresh() ? ((state.cal.allDay || {})[state.day] || []) : [];
-    allDay.forEach(function (a) { tips.unshift((a.outOfOffice ? "You're marked out of office: " : "All-day event: ") + q(a.label) + ". If you're not calling today, ignore this plan."); });
+    allDay.forEach(function (a) { tips.unshift({ text: (a.outOfOffice ? "You're marked out of office: " : "All-day event: ") + q(a.label) + ". If you're not calling today, ignore this plan." }); });
     var ignored = listItems().filter(function (it) { return it.ignored; }).map(function (it) {
       return "Ignoring " + q(it.label) + " (" + (it.type === "callback" ? L.fmt(it.start) : L.fmtRange(it.start, it.end)) + "). That time is calling time.";
     });
     var notes = ignored.concat(describeChanges(cur.plan, cur.est));
     box.appendChild(el("h3", { text: "Today" }));
     var ul = el("ul");
-    tips.forEach(function (t) { ul.appendChild(el("li", { class: "tip", text: t })); });
+    tips.forEach(function (t) {
+      var li = el("li", { class: "tip", text: t.text });
+      if (t.item && t.item.link) { li.appendChild(document.createTextNode(" ")); li.appendChild(addLink("Open meeting", t.item.link, "Open " + t.item.label + " in Google Calendar")); }
+      ul.appendChild(li);
+    });
     notes.forEach(function (t) { ul.appendChild(el("li", { text: t })); });
     box.appendChild(ul);
   }
@@ -1114,7 +1165,7 @@
     var to = new Date(week[5] + "T00:00:00Z"); to.setUTCDate(to.getUTCDate() + 2);
     var url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250" +
       "&timeMin=" + encodeURIComponent(from.toISOString()) + "&timeMax=" + encodeURIComponent(to.toISOString()) +
-      "&fields=" + encodeURIComponent("items(id,summary,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus))");
+      "&fields=" + encodeURIComponent("items(id,summary,description,htmlLink,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus))");
     calStatus("Loading your meetings\u2026");
     fetch(url, { headers: { Authorization: "Bearer " + token } }).then(function (r) {
       if (r.status === 401) { token = null; throw new Error("Your Google sign-in expired. Click Reconnect."); }
@@ -1123,14 +1174,15 @@
       return r.json();
     }).then(function (data) {
       var byDate = {}; Object.keys(week).forEach(function (d) { byDate[week[d]] = +d; });
-      var items = { 1: [], 2: [], 3: [], 4: [], 5: [] }, allDay = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      var items = { 1: [], 2: [], 3: [], 4: [], 5: [] }, allDay = { 1: [], 2: [], 3: [], 4: [], 5: [] }, blocks = { 1: [], 2: [], 3: [], 4: [], 5: [] };
       (data.items || []).forEach(function (ev) {
         var r = L.eventToItem(ev);
-        if (r.item && byDate[r.item.date]) items[byDate[r.item.date]].push(r.item);
+        if (r.block) { if (byDate[r.block.date]) blocks[byDate[r.block.date]].push(r.block); }
+        else if (r.item && byDate[r.item.date]) items[byDate[r.item.date]].push(r.item);
         else if (r.allDay && byDate[r.date]) allDay[byDate[r.date]].push({ label: r.label, outOfOffice: r.outOfOffice });
       });
       var keepHidden = (state.cal.hidden || []).filter(function (id) { return Object.keys(items).some(function (d) { return items[d].some(function (it) { return it.id === id; }); }); });
-      state.cal = { connected: true, week: week, items: items, allDay: allDay, hidden: keepHidden, fetchedAt: Date.now() };
+      state.cal = { connected: true, week: week, items: items, allDay: allDay, blocks: blocks, hidden: keepHidden, fetchedAt: Date.now() };
       save(); calMsg = null; renderDay();
     }).catch(function (err) { calStatus(err.message || "Couldn't load your calendar.", true); });
   }

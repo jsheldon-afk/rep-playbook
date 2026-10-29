@@ -34,6 +34,10 @@ window.CONFIG = {
   googleClientId: "",
   calendarScope: "https://www.googleapis.com/auth/calendar.events.readonly",
   repTimeZone: "America/New_York",
+  // Calling blocks added from the site carry this tag in their notes, so the site
+  // recognizes them when it reads the calendar and doesn't treat them as meetings.
+  calendarBlockTag: "[Rep Playbook calling block]",
+
   // How meetings are recognized as demos. Same rules as the Demo Reminders script:
   // a calendar event with a guest from outside these domains is a prospect meeting.
   internalDomains: ["seatedapp.io"],
