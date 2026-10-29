@@ -51,6 +51,19 @@ GitHub Pages sites on free plans are public. This site contains no rep or custom
 ## How the site spots demos
 It uses the same rules as the Demo Reminders script. A calendar event with a guest from outside `internalDomains` (seatedapp.io) is a prospect meeting. If its title has a follow-up word it's a follow-up, otherwise a demo, and a skip word means it's neither. Demos and follow-ups get prep time and are never flagged as "move this out of prime time." Meetings typed into the site have no guest list, so the site looks for "demo," "intro" or a follow-up word in the title instead.
 
+## How the site spots callbacks
+A calendar event counts as a callback (it blocks 15 minutes and counts toward callback dials) when:
+- its title contains "REMINDER - " (Nooks callback reminders), or
+- its title contains "Callback" or "Call Back" and no outside guests are invited, or
+- its title contains "Call" and nobody else is invited (so a "Team call" with colleagues stays a meeting).
+
+Calling time a rep blocks on their own calendar ("Call block", "Power hour", "Dial session", "Prospecting") is checked first. It isn't a meeting or a callback; the site treats it like its own calling blocks. Those words are in `callBlockWords`.
+
+Change the callback words in `callbackRules` in `config.js`.
+
+## The daily plan
+Non-calling time is: meetings (from the calendar), demo prep (10 minutes before each demo), day organization prep (9:00), cold call bot practice (30 minutes, every rep, every day, 9:30 by default) and cleaning leads (5:15). If a meeting covers bot practice, the site moves it to the nearest free half hour. Times and lengths are in the `defaultDay`, `thuFriDay` and `reflow` settings in `config.js`.
+
 ## Changing numbers, names or times
 Everything lives in `config.js`: time zones, calling windows, booking rates, dispositions, sentiments, reject reasons and the daily templates. Edit the values there; no other file needs to change. Keep disposition, sentiment and reject-reason names spelled exactly as they appear in Nooks and Salesforce.
 

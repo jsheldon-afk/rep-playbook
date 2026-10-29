@@ -47,7 +47,7 @@
   };
 
   // ---------- Day builder ----------
-  var PRIORITY = { prep: 1, wrap: 1, mobile: 2, restaurant: 3, prime: 5, lunch: 6, callbacks: 7, sweep: 7 };
+  var PRIORITY = { prep: 1, wrap: 1, leads: 1, mobile: 2, restaurant: 3, prime: 5, lunch: 6, practice: 6, callbacks: 7, sweep: 7 };
 
   L.buildDay = function (opts) {
     var day = opts.day; // 1 = Mon ... 5 = Fri
@@ -131,6 +131,14 @@
     if (lostSlots("lunch")) {
       var ok3 = ensure("lunch", lunchNeed, L.toMin(R.lunchWindow[0]), L.toMin(R.lunchWindow[1]), ["mobile", "restaurant"]);
       if (!ok3) notes.push("There's no free half hour for lunch between 11:30 and 2:00. Take a break where you can.");
+    }
+    // Cold call bot practice is required: if a meeting covers it, move it, nearest first.
+    if (lostSlots("practice")) {
+      var ok4 = ensure("practice", R.practiceMinutes / step, L.toMin(R.practiceWindow[0]), L.toMin(R.practiceWindow[1]), ["mobile", "restaurant"]);
+      if (!ok4) notes.push("There's no free half hour for cold call bot practice today. Do it first thing tomorrow.");
+    }
+    if (lostSlots("leads") && lostSlots("leads") === slots.filter(function (s) { return s.base === "leads"; }).length) {
+      notes.push("Your lead-cleaning time is taken. Clean today's leads before you log off.");
     }
     // Prime time: move displaced prime minutes onto mobile time where a zone's restaurant line is in its window.
     var primeLost = lostSlots("prime");
@@ -339,7 +347,10 @@
     if (ev.transparency === "transparent") return { skip: "free" };
     var me = (ev.attendees || []).filter(function (a) { return a.self; })[0];
     if (me && me.responseStatus === "declined") return { skip: "declined" };
-    if ((ev.description || "").indexOf(C.calendarBlockTag) >= 0 && ev.start && ev.start.dateTime) {
+    var titled = ev.summary || "";
+    var isReminder = (C.callbackRules.reminderText || []).some(function (x) { return titled.toUpperCase().indexOf(String(x).toUpperCase()) >= 0; });
+    var ownBlock = !isReminder && !L.externalGuests(ev).length && L.hasWord(titled, C.callBlockWords);
+    if (((ev.description || "").indexOf(C.calendarBlockTag) >= 0 || ownBlock) && ev.start && ev.start.dateTime) {
       var ba = L.tzParts(new Date(ev.start.dateTime)), bb = L.tzParts(new Date(ev.end.dateTime));
       return { block: { date: ba.ymd, start: ba.min, end: bb.ymd === ba.ymd ? bb.min : 24 * 60 } };
     }
@@ -350,8 +361,8 @@
     var end = b.ymd === a.ymd ? b.min : 24 * 60;
     if (end <= a.min) return { skip: "zero-length" };
     var label = ev.summary || (ev.eventType === "outOfOffice" ? "Out of office" : "Busy");
-    var type = /call\s?back/i.test(label) ? "callback" : "meeting";
-    var demo = L.externalGuests(ev).length > 0 && !L.hasWord(label, C.skipWords);
+    var type = L.isCallbackEvent(ev, label) ? "callback" : "meeting";
+    var demo = type === "meeting" && L.externalGuests(ev).length > 0 && !L.hasWord(label, C.skipWords);
     return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo, link: ev.htmlLink || null } };
   };
 
@@ -368,6 +379,19 @@
   L.ymdLocal = function (d) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  };
+
+  // Callback rules (config.callbackRules):
+  //   "REMINDER - " anywhere in the title (Nooks reminders): always a callback.
+  //   "Callback" / "Call Back": a callback when there are no outside guests.
+  //   "Call": a callback only when nobody else is invited.
+  L.isCallbackEvent = function (ev, label) {
+    var R = C.callbackRules || {}, t = String(label || ev.summary || "");
+    if ((R.reminderText || []).some(function (x) { return t.toUpperCase().indexOf(String(x).toUpperCase()) >= 0; })) return true;
+    var others = (ev.attendees || []).filter(function (a) { return !a.self && !a.resource && a.responseStatus !== "declined"; });
+    if (!L.externalGuests(ev).length && L.hasWord(t, R.callbackWords)) return true;
+    if (!others.length && L.hasWord(t, R.callWords)) return true;
+    return false;
   };
 
   // ---------- Suggestions ----------
@@ -1021,11 +1045,11 @@
         title = bt.label + (b.moved ? " (moved)" : "");
         why = bt.why; who = L.whoLine(b);
         var addEl = null;
-        if (bt.dials) {
+        if (bt.dials || b.type === "practice" || b.type === "leads") {
           if (blockOnCal(state.day, b)) addEl = el("span", { class: "cal-add on", text: "\u2713 On calendar" });
           else addEl = addLink("+ Calendar", L.gcalLink({
             ymd: dayYmd(state.day), start: b.start, end: b.end,
-            title: "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : ""),
+            title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
             details: [who, bt.why, "", C.calendarBlockTag].filter(function (x) { return x != null; }).join("\n")
           }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
         }
@@ -1041,7 +1065,7 @@
 
   function renderLegend() {
     var lg = $("legend"); lg.innerHTML = "";
-    ["prep", "callbacks", "mobile", "restaurant", "prime", "sweep", "lunch", "wrap"].forEach(function (t) {
+    ["prep", "practice", "callbacks", "mobile", "restaurant", "prime", "sweep", "lunch", "leads", "wrap"].forEach(function (t) {
       lg.appendChild(el("span", null, [el("i", { class: "t-" + t }), C.blockTypes[t].label]));
     });
     lg.appendChild(el("span", null, [el("i", { class: "t-fixed" }), "Meetings and agreed callbacks (fixed)"]));

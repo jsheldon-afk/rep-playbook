@@ -31,12 +31,24 @@ window.CONFIG = {
 
   // ---------- Google Calendar ----------
   // Paste the OAuth client ID from Google Cloud here (see README). Leave "" to hide the feature.
-  googleClientId: "",
+  googleClientId: "660445438110-v7njmd3pkaooh5ighga54gkn7ie64c4o.apps.googleusercontent.com",
   calendarScope: "https://www.googleapis.com/auth/calendar.events.readonly",
   repTimeZone: "America/New_York",
   // Calling blocks added from the site carry this tag in their notes, so the site
   // recognizes them when it reads the calendar and doesn't treat them as meetings.
   calendarBlockTag: "[Rep Playbook calling block]",
+
+  // Calling time a rep blocked on their own calendar ("Call block", "Power hour", "Dial session").
+  // Treated like the site's own calling blocks: not a meeting and not a callback. Ignored if outside guests are invited.
+  callBlockWords: ["block", "blitz", "calls", "power hour", "dial", "dials", "dialing", "prospecting", "cold call", "calling"],
+
+  // How calendar events are recognized as callbacks (they block 15 minutes and count as callback dials).
+  callbackRules: {
+    reminderText: ["REMINDER - "],          // Nooks callback reminders: always a callback
+    callbackWords: ["callback", "call back"], // a callback when no outside guests are invited
+    callWords: ["call"]                       // a callback only when nobody else is invited,
+                                              // so "Team call" with colleagues stays a meeting
+  },
 
   // How meetings are recognized as demos. Same rules as the Demo Reminders script:
   // a calendar event with a guest from outside these domains is a prospect meeting.
@@ -172,35 +184,43 @@ window.CONFIG = {
   ],
 
   // ---------- Daily templates (times in ET) ----------
-  // type: prep | callbacks | mobile | restaurant | prime | sweep | lunch | wrap
+  // type: prep | practice | callbacks | mobile | restaurant | prime | sweep | lunch | leads | wrap
+  // Non-calling time: meetings (from the calendar), demo prep, day organization prep,
+  // cold call bot practice (30 minutes, everyone, every day) and cleaning leads.
   defaultDay: [
     { start: "09:00", end: "09:30", type: "prep" },
-    { start: "09:30", end: "10:30", type: "callbacks" },
+    { start: "09:30", end: "10:00", type: "practice" },
+    { start: "10:00", end: "10:30", type: "callbacks" },
     { start: "10:30", end: "12:30", type: "mobile" },
     { start: "12:30", end: "13:00", type: "lunch" },
     { start: "13:00", end: "14:00", type: "restaurant" },
     { start: "14:00", end: "15:00", type: "mobile" },
     { start: "15:00", end: "15:30", type: "sweep" },
     { start: "15:30", end: "17:00", type: "prime" },
-    { start: "17:00", end: "17:45", type: "restaurant" },
+    { start: "17:00", end: "17:15", type: "restaurant" },
+    { start: "17:15", end: "17:45", type: "leads" },
     { start: "17:45", end: "18:00", type: "wrap" }
   ],
   // Thursday and Friday: restaurant lines book best, so 2:00-2:30 becomes a restaurant block.
   thuFriDay: [
     { start: "09:00", end: "09:30", type: "prep" },
-    { start: "09:30", end: "10:30", type: "callbacks" },
+    { start: "09:30", end: "10:00", type: "practice" },
+    { start: "10:00", end: "10:30", type: "callbacks" },
     { start: "10:30", end: "12:30", type: "mobile" },
     { start: "12:30", end: "13:00", type: "lunch" },
     { start: "13:00", end: "14:30", type: "restaurant" },
     { start: "14:30", end: "15:00", type: "mobile" },
     { start: "15:00", end: "15:30", type: "sweep" },
     { start: "15:30", end: "17:00", type: "prime" },
-    { start: "17:00", end: "17:45", type: "restaurant" },
+    { start: "17:00", end: "17:15", type: "restaurant" },
+    { start: "17:15", end: "17:45", type: "leads" },
     { start: "17:45", end: "18:00", type: "wrap" }
   ],
 
   blockTypes: {
-    prep:       { label: "Prep", dials: false, why: "No dialing. Build today's callback list and load your lists sorted by time zone." },
+    prep:       { label: "Day organization prep", dials: false, why: "No dialing. Build today's callback list, check your calendar and load your lists sorted by time zone." },
+    practice:   { label: "Cold call bot practice", dials: false, why: "30 minutes with the Nooks practice bots. Warm up before your first real dial." },
+    leads:      { label: "Clean leads", dials: false, why: "Fix bad numbers, add owner names and cells you learned today, and load tomorrow's lists." },
     callbacks:  { label: "Callbacks + Missed Meeting rebooks", dials: true, rate: "missedMeetingRebook", why: "Callbacks booked within a day convert at 18%. Do them before any new dial." },
     mobile:     { label: "Mobile block", dials: true, rate: "mobileBlock", why: "Owners pick up their cells late morning to early afternoon. Fresh mobiles first." },
     restaurant: { label: "Restaurant block", dials: true, rate: "restaurantBlock", why: "Restaurant lines work in the afternoon, after the lunch rush." },
@@ -216,6 +236,8 @@ window.CONFIG = {
     afternoonSweepWindow: ["14:30", "17:00"],
     lunchWindow: ["11:30", "14:00"],
     minCallbackMinutes: 30,
-    lunchMinutes: 30
+    lunchMinutes: 30,
+    practiceMinutes: 30,                  // required every day
+    practiceWindow: ["09:00", "17:00"]    // where practice can move if a meeting covers it
   }
 };
