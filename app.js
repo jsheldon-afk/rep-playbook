@@ -1052,36 +1052,36 @@
     })(d);
   }
 
-  function renderItems() {
-    var ul = $("items"); ul.innerHTML = "";
-    var dd = dayData();
-    var rows = calItems().map(function (it) { return { it: it, cal: true }; });
-    rows.sort(function (a, b) { return a.it.start - b.it.start; }).forEach(function (o) {
-      var it = o.it;
-      var sel = el("select", { "aria-label": "How to treat " + it.label });
-      sel.appendChild(el("option", { value: "meeting", text: "Meeting" }));
-      sel.appendChild(el("option", { value: "callback", text: "Agreed callback" }));
-      sel.appendChild(el("option", { value: "ignore", text: "Ignore (call during it)" }));
-      sel.value = it.ignored ? "ignore" : it.type;
-      if (it.origEnd == null) it.origEnd = it.end;
-      sel.addEventListener("change", function () {
-        if (sel.value === "ignore") { setIgnored(it, true); }
-        else {
-          setIgnored(it, false);
-          it.type = sel.value;
-          if (it.type === "callback") it.end = it.start + 15; else if (it.origEnd) it.end = it.origEnd;
-        }
-        save(); renderDay();
-      });
-      var t = it.type === "callback" ? L.fmt(it.start) : L.fmtRange(it.start, it.end);
-      ul.appendChild(el("li", { class: it.ignored ? "ignored" : null }, [
-        el("span", null, [el("strong", { text: t }), " " + it.label,
-          L.demoKind(it) ? el("span", { class: "src-tag demo-tag", text: L.demoKind(it) }) : null,
-          it.ignored ? el("span", { class: "hint", style: "display:block;margin:0", text: "Ignored: this time is calling time." }) : null]),
-        sel
-      ]));
-    });
+  // How the site treats a calendar event: "meeting", "callback" or "ignore".
+  function setTreatment(it, how) {
+    if (it.origEnd == null) it.origEnd = it.end;
+    if (how === "ignore") { setIgnored(it, true); }
+    else {
+      setIgnored(it, false);
+      it.type = how;
+      it.end = how === "callback" ? it.start + 15 : it.origEnd;
+    }
+    save(); renderDay();
   }
+  var openMenu = null;
+  function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
+  function showMenu(anchor, it) {
+    closeMenu();
+    var cal = $("calendar");
+    var cur = it.ignored ? "ignore" : it.type;
+    var menu = el("div", { class: "cal-menu", role: "menu", "aria-label": "How to treat " + it.label });
+    menu.appendChild(el("p", { class: "cal-menu-title", text: it.label }));
+    [["meeting", "Meeting", "Blocks this time"], ["callback", "Callback", "15 minutes, counts as a callback"], ["ignore", "Ignore", "Call during it"]].forEach(function (o) {
+      menu.appendChild(el("button", { type: "button", role: "menuitemradio", "aria-checked": String(cur === o[0]), class: cur === o[0] ? "on" : null,
+        onclick: function () { closeMenu(); setTreatment(it, o[0]); } }, [el("strong", { text: o[1] }), el("span", { text: o[2] })]));
+    });
+    menu.style.top = (anchor.offsetTop + Math.min(anchor.offsetHeight, 44)) + "px";
+    cal.appendChild(menu);
+    openMenu = menu;
+    menu.querySelector("button.on, button").focus();
+  }
+  document.addEventListener("click", function (e) { if (openMenu && !openMenu.contains(e.target) && !e.target.closest(".cal-block.clickable, .ign-undo")) closeMenu(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
 
   var LOCK = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5" width="8" height="6" rx="1" fill="currentColor"/><path d="M4 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
 
@@ -1102,9 +1102,17 @@
       if (b.type === "fixed") {
         var f = b.fixed;
         var dk = f.kind === "meeting" ? L.demoKind(f.item || f.label) : null;
-        title = f.kind === "callback" ? "Agreed callback: " + f.label : (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
+        title = f.kind === "callback" ? "Callback: " + String(f.label).replace(/^\s*REMINDER\s*-\s*/i, "") : (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
         li.appendChild(el("div", { class: "b-title", html: LOCK + "<span></span>" }));
         li.lastChild.lastChild.textContent = title;
+        if (f.item && f.kind !== "prep") (function (item, node) {
+          node.classList.add("clickable");
+          node.setAttribute("tabindex", "0");
+          node.setAttribute("role", "button");
+          node.setAttribute("aria-label", title + ". Change how it's treated");
+          node.addEventListener("click", function (e) { e.stopPropagation(); showMenu(node, item); });
+          node.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showMenu(node, item); } });
+        })(f.item, li);
         var ft = f.kind === "callback" ? L.fmt(f.start) : L.fmtRange(f.start, f.end);
         li.lastChild.appendChild(el("span", { class: "b-time", text: ft }));
       } else {
@@ -1120,6 +1128,14 @@
       list.appendChild(li);
     });
     cal.appendChild(list);
+    // Ignored meetings: a dashed outline over the calling time, with an Undo button.
+    listItems().filter(function (it) { return it.ignored && it.end > start && it.start < end; }).forEach(function (it) {
+      var a = Math.max(it.start, start), z = Math.min(it.type === "callback" ? it.start + 15 : it.end, end);
+      var box = el("div", { class: "cal-ignored", style: "top:" + (px(a) + 1) + "px;height:" + Math.max(px(z) - px(a) - 2, 18) + "px" });
+      box.appendChild(el("button", { type: "button", class: "ign-undo", "aria-label": "Stop ignoring " + it.label,
+        onclick: function (e) { e.stopPropagation(); showMenu(box, it); } }, ["Ignored: " + it.label]));
+      cal.appendChild(box);
+    });
   }
 
   function renderLegend() {
@@ -1339,10 +1355,7 @@
     ["day-toggle", "tasks", "day-main", "clear-day"].forEach(function (id) { if ($(id)) $(id).hidden = !connected; });
     renderCalBox();
     if (!connected) return;
-    renderItems();
-    $("items-hint").textContent = calItems().length
-      ? "From your Google Calendar. Set anything you'll call through to Ignore."
-      : "Nothing on your calendar today.";
+    closeMenu();
     var cur = planFor(state.day);
     renderCalendar(cur.plan);
     renderToday(cur);

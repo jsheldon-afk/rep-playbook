@@ -78,25 +78,14 @@
         <div id="callback-field"></div>
       </div>
       <div id="task-check" aria-live="polite"></div>
+      <button class="btn" id="clear-day" type="button" style="margin-top:14px">Clear this day</button>
     </div>
 
-    <div class="day-grid" id="day-main">
-      <div>
-        <div class="panel">
-          <h3>Today's meetings</h3>
-          <p class="hint" id="items-hint"></p>
-          <ul class="items" id="items" aria-label="Today's meetings"></ul>
-        </div>
-
-        <button class="btn" id="clear-day" type="button">Clear this day</button>
-
-      </div>
-
-      <div>
-        <div class="changes" id="today" aria-live="polite"></div>
-        <div class="legend" id="legend"></div>
-        <div class="calendar" id="calendar"></div>
-      </div>
+    <div id="day-main">
+      <div class="changes" id="today" aria-live="polite"></div>
+      <p class="hint" id="cal-hint">Click a meeting to ignore it (and call during it) or to mark it as a callback.</p>
+      <div class="legend" id="legend"></div>
+      <div class="calendar" id="calendar"></div>
     </div>
   </div>
 
