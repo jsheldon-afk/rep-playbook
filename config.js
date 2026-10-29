@@ -31,23 +31,23 @@ window.CONFIG = {
 
   // ---------- Google Calendar ----------
   // Paste the OAuth client ID from Google Cloud here (see README). Leave "" to hide the feature.
-  googleClientId: "660445438110-v7njmd3pkaooh5ighga54gkn7ie64c4o.apps.googleusercontent.com",
+  googleClientId: "",
   calendarScope: "https://www.googleapis.com/auth/calendar.events.readonly",
   repTimeZone: "America/New_York",
   // How meetings are recognized as demos. Same rules as the Demo Reminders script:
   // a calendar event with a guest from outside these domains is a prospect meeting.
   internalDomains: ["seatedapp.io"],
   // Copy these from the Settings tab of the Demo Reminders sheet so both tools agree.
-  followUpWords: ["follow up", "f/u", "reconnect", "second call", "next steps","order form"], // TO CONFIRM: "Follow-up words" row
+  followUpWords: ["follow up", "f/u", "reconnect", "second call"], // TO CONFIRM: "Follow-up words" row
   skipWords: [],                                                   // TO CONFIRM: "Skip words" row
-  // Pasted or typed meetings have no guest list, so titles with these words count as demos.
+  // Meetings typed into the site have no guest list, so titles with these words count as demos.
   demoTitleKeywords: ["demo", "intro"],
   // Meetings in this ET window get a "move it if you can" suggestion (demos excluded).
   protectedWindow: ["15:30", "17:00"],
 
   // ---------- Dialing ----------
-  dialsPerHour: 45,        // TO CONFIRM: realistic power-dialer pace for your reps
-  defaultDialTarget: 120,
+  dialsPerHour: 45,        // Team target. Calls library, 90 days: about 40-50 per active hour (power 45, parallel 74)
+  defaultDialTarget: 120,  // Team daily target
   dialsPerCallbackToday: 1,
   demoPrepMinutes: 10,
 

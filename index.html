@@ -37,31 +37,17 @@
       <div id="cheat"></div>
     </section>
 
+    <section class="block" id="callback-section">
+      <h2>Callbacks</h2>
+      <div id="callbacks"></div>
+    </section>
+
     <section class="block" id="reject-section">
-      <h2>Which reject reason?</h2>
-      <p class="lede">When you're done with an account, answer these questions to find the right Temporarily Reject reason.</p>
-      <div class="wizard" id="reject-wizard"></div>
+      <h2>Reject reasons</h2>
+      <p class="lede">Every Temporarily Reject needs one of these. The simulator below picks the right one for you.</p>
       <details class="collapsible">
         <summary>See every reason</summary>
         <div id="reject-table"></div>
-      </details>
-    </section>
-
-    <section class="block" id="callback-section">
-      <h2>The 5-callback rule</h2>
-      <div id="callback-rule"></div>
-    </section>
-
-    <section class="block" id="why-section">
-      <h2>Why callbacks matter</h2>
-      <div id="why"></div>
-    </section>
-
-    <section class="block" id="glossary-section">
-      <h2>Glossary</h2>
-      <details class="collapsible">
-        <summary>Show every term</summary>
-        <dl class="glossary" id="glossary"></dl>
       </details>
     </section>
 
@@ -87,13 +73,7 @@
 
         <div class="panel">
           <h3>Your meetings</h3>
-          <label for="paste">Paste meetings, one per line</label>
-          <p class="hint">Times in Eastern. Example: 10:00-10:30 Demo, or 2pm - 2:45pm Team meeting</p>
-          <textarea id="paste" placeholder="10:00-10:30 Demo&#10;2pm - 2:45pm Team meeting"></textarea>
-          <button class="btn" id="paste-add" type="button">Add pasted meetings</button>
-          <ul class="errors" id="paste-errors" aria-live="polite"></ul>
-
-          <h3 style="margin-top:20px">Or add one</h3>
+          <p class="hint">Not on your calendar? Add it here. Times in Eastern.</p>
           <div class="row">
             <div><label for="add-start">Start (ET)</label><input type="time" id="add-start" step="300"></div>
             <div><label for="add-end">End (ET)</label><input type="time" id="add-end" step="300"></div>
@@ -110,8 +90,6 @@
           <ul class="errors" id="add-errors" aria-live="polite"></ul>
 
           <ul class="items" id="items" aria-label="Today's meetings"></ul>
-
-          <label class="check" style="margin-top:16px"><input type="checkbox" id="prep-demos"> <span id="prep-label">Add prep time before each demo</span></label>
         </div>
 
         <div class="panel">
@@ -123,19 +101,10 @@
           <button class="btn" id="clear-day" type="button" style="margin-top:16px">Clear my day</button>
         </div>
 
-        <div class="panel" id="helper">
-          <h3>When an owner asks for a callback</h3>
-          <div class="row">
-            <div><label for="h-zone">Restaurant's time zone</label><select id="h-zone"></select></div>
-            <div><label for="h-line">Calling their</label><select id="h-line"><option value="mobile">Mobile</option><option value="restaurant">Restaurant line</option></select></div>
-          </div>
-          <div class="helper-out" id="helper-out" aria-live="polite"></div>
-        </div>
       </div>
 
       <div>
-        <div class="suggestions" id="suggestions" aria-live="polite"></div>
-        <div class="changes" id="changes" aria-live="polite"></div>
+        <div class="changes" id="today" aria-live="polite"></div>
         <div class="legend" id="legend"></div>
         <div class="calendar" id="calendar"></div>
         <div class="results" id="results" aria-live="polite"></div>

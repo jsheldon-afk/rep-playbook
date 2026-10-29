@@ -14,7 +14,7 @@ Plain HTML, CSS and JavaScript. No build step and no internet needed.
 Inputs on **My day** are saved in your browser only.
 
 ## Connect Google Calendar (one-time setup)
-Reps can click **Connect my Google Calendar** on the My day tab to pull in the week's meetings. It's read-only, and events go straight from Google to the rep's browser; nothing is stored anywhere else. Until a client ID is added, the Google Calendar panel just shows a note and reps paste meetings instead.
+Reps can click **Connect my Google Calendar** on the My day tab to pull in the week's meetings. It's read-only, and events go straight from Google to the rep's browser; nothing is stored anywhere else. Until a client ID is added, the Google Calendar panel just shows a note and reps add meetings by hand instead.
 
 Google renames its console menus from time to time; if a label below doesn't match exactly, look for the closest one.
 
@@ -49,7 +49,7 @@ Then go to `http://localhost:8000` in your browser. Everything else on the site 
 GitHub Pages sites on free plans are public. This site contains no rep or customer data, only team-level rates.
 
 ## How the site spots demos
-It uses the same rules as the Demo Reminders script. A calendar event with a guest from outside `internalDomains` (seatedapp.io) is a prospect meeting. If its title has a follow-up word it's a follow-up, otherwise a demo, and a skip word means it's neither. Demos and follow-ups get prep time and are never flagged as "move this out of prime time." Pasted or typed meetings have no guest list, so the site looks for "demo," "intro" or a follow-up word in the title instead.
+It uses the same rules as the Demo Reminders script. A calendar event with a guest from outside `internalDomains` (seatedapp.io) is a prospect meeting. If its title has a follow-up word it's a follow-up, otherwise a demo, and a skip word means it's neither. Demos and follow-ups get prep time and are never flagged as "move this out of prime time." Meetings typed into the site have no guest list, so the site looks for "demo," "intro" or a follow-up word in the title instead.
 
 ## Changing numbers, names or times
 Everything lives in `config.js`: time zones, calling windows, booking rates, dispositions, sentiments, reject reasons and the daily templates. Edit the values there; no other file needs to change. Keep disposition, sentiment and reject-reason names spelled exactly as they appear in Nooks and Salesforce.

@@ -46,65 +46,12 @@
     return C.zones.filter(function (z) { return L.zoneOk(type, etMin, z); });
   };
 
-  // ---------- Meeting parser ----------
-  function mer(s) { if (!s) return null; s = s.toLowerCase(); return s.charAt(0) === "p" ? "pm" : "am"; }
-  function apply(h, m) { // h already 0-23 candidate
-    return h * 60 + m;
-  }
-  function withMer(h, merid) { var hh = h % 12; if (merid === "pm") hh += 12; return hh; }
-  function guess(h) { // no am/pm given
-    if (h >= 13 || h === 0) return h;      // 24-hour clock
-    if (h >= 8 && h <= 11) return h;        // morning
-    if (h === 12) return 12;
-    return h + 12;                          // 1-7 -> afternoon
-  }
-  L.parseLine = function (line) {
-    var re = /^\s*(\d{1,2})(?::(\d{2}))?\s*(a\.?m?\.?|p\.?m?\.?)?\s*(?:-|\u2013|\u2014|to)\s*(\d{1,2})(?::(\d{2}))?\s*(a\.?m?\.?|p\.?m?\.?)?(?![a-z])\s*(.*)$/i;
-    var m = re.exec(line);
-    if (!m) return { error: "Couldn't read a start and end time." };
-    var h1 = +m[1], m1 = +(m[2] || 0), mer1 = mer(m[3]);
-    var h2 = +m[4], m2 = +(m[5] || 0), mer2 = mer(m[6]);
-    if (m1 > 59 || m2 > 59 || h1 > 24 || h2 > 24) return { error: "One of the times isn't a real time." };
-    var s, e;
-    if (mer1 && mer2) { s = withMer(h1, mer1); e = withMer(h2, mer2); }
-    else if (!mer1 && mer2) {
-      e = withMer(h2, mer2);
-      if (h1 >= 13) s = h1;
-      else { s = withMer(h1, mer2); if (apply(s, m1) >= apply(e, m2)) s = withMer(h1, mer2 === "pm" ? "am" : "pm"); }
-    } else if (mer1 && !mer2) {
-      s = withMer(h1, mer1);
-      if (h2 >= 13) e = h2;
-      else { e = withMer(h2, mer1); if (apply(e, m2) <= apply(s, m1)) e = withMer(h2, mer1 === "am" ? "pm" : "am"); }
-    } else {
-      s = guess(h1); e = guess(h2);
-      if (apply(e, m2) <= apply(s, m1) && h2 < 12 && e < 12) e += 12;
-    }
-    var start = apply(s, m1), end = apply(e, m2);
-    if (end <= start) return { error: "The end time is before the start time." };
-    if (end - start > 8 * 60) return { error: "That meeting is longer than 8 hours." };
-    var label = (m[7] || "").replace(/^[\s,:\-\u2013\u2014]+/, "").trim() || "Meeting";
-    var type = /call\s?back/i.test(label) ? "callback" : "meeting";
-    return { item: { start: start, end: type === "callback" ? start + 15 : end, label: label, type: type } };
-  };
-  L.parseMeetings = function (text) {
-    var items = [], errors = [];
-    String(text || "").split(/\r?\n/).forEach(function (raw) {
-      var line = raw.trim();
-      if (!line) return;
-      var r = L.parseLine(line);
-      if (r.error) errors.push({ line: line, msg: r.error });
-      else items.push(r.item);
-    });
-    return { items: items, errors: errors };
-  };
-
   // ---------- Day builder ----------
   var PRIORITY = { prep: 1, wrap: 1, mobile: 2, restaurant: 3, prime: 5, lunch: 6, callbacks: 7, sweep: 7 };
 
   L.buildDay = function (opts) {
     var day = opts.day; // 1 = Mon ... 5 = Fri
     var items = opts.items || [];
-    var prepDemos = !!opts.prepDemos;
     var step = C.slotMinutes, dayStart = L.toMin(C.dayStart), dayEnd = L.toMin(C.dayEnd);
     var template = (day === 4 || day === 5) ? C.thuFriDay : C.defaultDay;
     var slots = [];
@@ -118,7 +65,7 @@
     items.forEach(function (it, idx) {
       var end = it.type === "callback" ? it.start + 15 : it.end;
       fixedList.push({ start: it.start, end: end, label: it.label, kind: it.type, idx: idx, item: it });
-      if (prepDemos && it.type === "meeting" && L.isDemo(it)) {
+      if (it.type === "meeting" && L.isDemo(it)) {
         fixedList.push({ start: it.start - C.demoPrepMinutes, end: it.start, label: "Demo prep", kind: "prep", idx: idx });
       }
     });
@@ -301,11 +248,6 @@
       callingMinutes: blocks.reduce(function (a, b) { return a + (b.end - b.start); }, 0)
     };
   };
-  L.dialsFor = function (meetings, est) {
-    if (!est.avgRate) return null;
-    return Math.ceil(meetings / est.avgRate);
-  };
-
   // ---------- Callbacks ----------
   L.addBusinessDays = function (date, n) {
     var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -426,31 +368,9 @@
       var prev = sorted.slice(0, i).filter(function (x) { return x.end > it.start - C.demoPrepMinutes && x.end <= it.start + 1; })[0];
       if (prev) out.push({ kind: "spacing", text: "No prep time before your " + L.fmt(it.start) + " " + (L.demoKind(it) === "Follow-up" ? "follow-up" : "demo") + ", " + q2(it.label) + ": " + q2(prev.label) + " ends at " + L.fmt(prev.end) + ". Leave " + C.demoPrepMinutes + " minutes between them if you can." });
     });
-    // 3) Dial goal vs. room
-    if (est.overCapacity) {
-      var t = "Your goal of " + opts.dialTarget + " dials won't fit today. You have room for about " + est.capacity + ".";
-      var others = [];
-      if (opts.week) Object.keys(opts.week).forEach(function (d) {
-        d = +d; if (d === day || !opts.week[d]) return;
-        var spare = opts.week[d].est.capacity - opts.week[d].target;
-        if (spare > 20) others.push({ d: d, spare: spare });
-      });
-      others.sort(function (a, b) { return b.spare - a.spare; });
-      if (others.length) t += " " + ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"][others[0].d] + " has room for about " + Math.round(others[0].spare) + " more.";
-      out.push({ kind: "goal", text: t });
-    }
-    // 4) Light day
-    if (est.callingMinutes < 3 * 60) out.push({ kind: "light", text: "Only " + L.dur(est.callingMinutes) + " of calling time today. Make your callbacks first; they're your best dials." });
     return out;
   };
   function q2(s) { return "\u201c" + s + "\u201d"; }
-
-  // First free 15-minute slot inside a callback window on a planned day.
-  L.firstFreeIn = function (plan, w) {
-    if (!w) return null;
-    var s = plan.slots.filter(function (x) { return !x.fixed && x.start >= w.etStart && x.start < w.etEnd && x.type !== "lunch"; })[0];
-    return s ? s.start : null;
-  };
 
   window.RP = L;
   if (typeof document === "undefined" || !document.getElementById("panel-how")) return;
@@ -462,6 +382,7 @@
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
     if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (attrs[k] == null) return;
       if (k === "class") e.className = attrs[k];
       else if (k === "text") e.textContent = attrs[k];
       else if (k === "html") e.innerHTML = attrs[k];
@@ -493,8 +414,8 @@
 
   var FLOW = [
     { id: "1", sys: "Salesforce", title: "An account is assigned to you", body: ["Accounts are restaurants. Once one is on your name in Salesforce, it's yours to work."] },
-    { id: "2", sys: "Salesloft", title: "Its contacts go into cadences", body: ["Owner mobiles go into the mobile cadence. The restaurant's main line goes into the restaurant cadence.", "One account can have several contacts in cadences at the same time."] },
-    { id: "3", sys: "Nooks", title: "You call and log a disposition and a sentiment", body: ["Disposition = who you reached. Sentiment = what happened. What you do next depends on the outcome below."] }
+    { id: "2", sys: "Salesloft", title: "Its contacts go into cadences", body: ["A cadence is a scheduled series of calls and emails to one contact. Owner mobiles go into the mobile cadence. The restaurant's main line goes into the restaurant cadence.", "One account can have several contacts in cadences at the same time."] },
+    { id: "3", sys: "Nooks", title: "You call and log a disposition and a sentiment", body: ["Disposition = who you reached. Sentiment = what happened. What you do next depends on the outcome below.", "Decision-maker (DM): the owner, partner or GM who can say yes. Gatekeeper: anyone else who answers."] }
   ];
   var OUTCOMES = [
     { id: "3a", sys: "Salesforce", auto: true, title: "Demo booked", log: "Connected with DM \u203a Demo Scheduled",
@@ -611,65 +532,27 @@
       el("thead", null, [el("tr", null, [el("th", { text: "Reason" }), el("th", { text: "Use it when" }), el("th", { text: "Don't confuse it with" })])]), tb])]));
   }
 
-  function renderCallbackRule() {
-    var box = $("callback-rule");
-    box.appendChild(el("p", { class: "lede", text: "Every owner you talked to who didn't book or say no gets " + C.callbackDials + " callbacks, whether you're calling a mobile or a restaurant line." }));
+  function renderCallbacks() {
+    var box = $("callbacks");
+    var s = C.callbackSpeedDemoRate;
+    box.appendChild(el("div", { class: "stats" }, [
+      el("div", { class: "stat" }, [el("div", { class: "big", text: C.callbackVsColdMultiple + "\u00d7" }), el("p", { text: "A callback is about " + C.callbackVsColdMultiple + " times more likely to book a demo than a first cold dial." })]),
+      el("div", { class: "stat" }, [el("div", { class: "big", text: pct(s.withinOneDay) }), el("p", { text: "of callbacks made within a day book a demo. After 3 days it's about " + pct(s.overThreeDays) + "." })]),
+      el("div", { class: "stat" }, [el("div", { class: "big", text: pct(C.callbacksNeverCalledShare) }), el("p", { text: "of callback requests last quarter never got a second call." })])
+    ]));
+    box.appendChild(el("p", { class: "lede", text: "Every owner you talked to who didn't book or say no gets " + C.callbackDials + " callbacks, on a mobile or a restaurant line." }));
     var tl = el("div", { class: "timeline" });
     C.followUpDays.forEach(function (d, i) {
       tl.appendChild(el("div", null, [el("strong", { text: "Callback " + (i + 1) }), el("span", { text: "Business day " + d + ", " + (i % 2 === 0 ? "earlier" : "later") + " in the day" })]));
     });
     box.appendChild(tl);
     box.appendChild(el("ul", { class: "rules" }, [
-      el("li", { text: "If they gave you a time, callback 1 is at that exact time, in their local time. Otherwise it's the next business day." }),
-      el("li", { text: "Use the number you reached them on, unless they gave you a better one." }),
-      el("li", { text: "Mobile callbacks: " + L.fmtRange(L.toMin(W.mobile[0]), L.toMin(W.mobile[1])) + " in the restaurant's time zone." }),
-      el("li", { text: "Restaurant-line callbacks: " + L.fmtRange(L.toMin(W.restaurant[0]), L.toMin(W.restaurant[1])) + " local, and " + L.fmtRange(L.toMin(W.restaurantPrime[0]), L.toMin(W.restaurantPrime[1])) + " is best. Never during lunch rush (" + L.fmtRange(L.toMin(W.lunchRush[0]), L.toMin(W.lunchRush[1])) + ") or after " + L.fmt(L.toMin(W.dinnerStart)) + " (dinner service)." }),
+      el("li", { text: "If they gave you a time, callback 1 is at that time, in their time zone. Otherwise it's the next business day." }),
+      el("li", { text: "Mobiles: " + L.fmtRange(L.toMin(W.mobile[0]), L.toMin(W.mobile[1])) + " their time. Restaurant lines: " + L.fmtRange(L.toMin(W.restaurant[0]), L.toMin(W.restaurant[1])) + " their time, " + L.fmtRange(L.toMin(W.restaurantPrime[0]), L.toMin(W.restaurantPrime[1])) + " is best. Never during lunch rush (" + L.fmtRange(L.toMin(W.lunchRush[0]), L.toMin(W.lunchRush[1])) + ") or after " + L.fmt(L.toMin(W.dinnerStart)) + "." }),
       el("li", { text: "If they asked for an email, send it the same day. Callback 1 is two business days later." }),
       el("li", { html: "No answer after " + C.callbackDials + " callbacks: Temporarily Reject with " + q("DM Connect, Failed to Reconnect") + "." })
     ]));
-  }
-
-  function renderWhy() {
-    var box = $("why");
-    var s = C.callbackSpeedDemoRate;
-    box.appendChild(el("div", { class: "stats" }, [
-      el("div", { class: "stat" }, [el("div", { class: "big", text: C.callbackVsColdMultiple + "\u00d7" }), el("p", { text: "A callback is about " + C.callbackVsColdMultiple + " times more likely to book a demo than a first cold dial (" + pct(C.firstCallbackDemoRate, 1) + " vs " + pct(C.firstColdDialDemoRate, 1) + " of dials)." })]),
-      el("div", { class: "stat" }, [el("div", { class: "big", text: pct(C.callbacksNeverCalledShare) }), el("p", { text: "of callback requests last quarter never got a second call." })]),
-      el("div", { class: "stat" }, [el("div", { class: "big", text: pct(C.callbackFirstTryPickupShare) }), el("p", { text: "of owners we reached on a callback picked up on the first try. About 9 in 10 within the first few." })])
-    ]));
-    var rows = [["Within 1 day", s.withinOneDay], ["1\u20133 days", s.oneToThreeDays], ["After 3 days", s.overThreeDays], ["Never", s.never]];
-    var bars = el("div", { class: "bars", role: "img", "aria-label": "Demo booked rate by how fast you call back: within 1 day 18%, 1 to 3 days 14%, after 3 days 10%, never 0%." });
-    bars.appendChild(el("p", { html: "<strong>How fast you call back vs. how often it books a demo</strong>" }));
-    rows.forEach(function (r) {
-      bars.appendChild(el("div", { class: "bar-row" }, [el("span", { text: r[0] }), el("div", { class: "bar-track" }, [el("div", { class: "bar-fill", style: "width:" + (r[1] / 0.2 * 100) + "%" })]), el("strong", { text: pct(r[1]) })]));
-    });
-    box.appendChild(bars);
-    box.appendChild(el("p", { class: "closer", text: "Your callbacks are the best dials you'll make all day." }));
-  }
-
-  function renderGlossary() {
-    var z = C.zones.map(function (x) { return x.name; }).join(", ");
-    var G = [
-      ["Salesforce", "Where accounts (restaurants) live and are assigned to you, and where you book demos."],
-      ["Salesloft", "Where contacts are put into calling cadences."],
-      ["Nooks", "The dialer you call from. Every call gets a disposition and a sentiment here, and you set callback reminders here."],
-      ["Account", "A restaurant in Salesforce. One account can have several contacts."],
-      ["Contact", "A person or phone number on an account: an owner's mobile, or the restaurant's main line."],
-      ["Cadence", "A scheduled series of calls and emails to one contact."],
-      ["Mobile cadence / restaurant cadence", "Calls to the owner's cell vs. calls to the restaurant's main line."],
-      ["Disposition", "Who you reached, or what kind of call it was."],
-      ["Sentiment", "What happened on the call."],
-      ["Decision-maker (DM)", "The owner, partner or GM who can say yes to a demo."],
-      ["Gatekeeper (GK)", "Anyone else who answers: a host, a server, a manager who can't decide."],
-      ["Callback", "A follow-up call to an owner you already spoke with."],
-      ["DM Connect", "A mark Salesforce puts on the account automatically when you log " + q("Connected with DM") + "."],
-      ["Temporarily Reject", "Takes the account off your name so you can be given a new one. You're done working it. It's handed out again in " + C.tempRejectRedistributionLabel + " and might or might not come back to you. It always needs a reason."],
-      ["Does Not Qualify", "The restaurant should never be sold to. It's removed permanently. Use it only when that's true."],
-      ["Lunch rush / dinner service", "When restaurant staff are too busy to talk: " + L.fmtRange(L.toMin(W.lunchRush[0]), L.toMin(W.lunchRush[1])) + " and after " + L.fmt(L.toMin(W.dinnerStart)) + ", in the restaurant's own time zone."],
-      ["Time zones", "We call restaurants in " + z + ". Restaurants run on their own clock: a 3:00 PM ET call is noon in Pacific."]
-    ];
-    var dl = $("glossary");
-    G.forEach(function (g) { dl.appendChild(el("dt", { text: g[0] })); dl.appendChild(el("dd", { text: g[1] })); });
+    box.appendChild(el("p", { class: "hint", text: "The simulator at the bottom of this page works out the exact dates and times for any callback." }));
   }
 
   // ---------- Wizard engine ----------
@@ -813,7 +696,7 @@
     r_bad_yes: { result: function (v) { return { title: "Mark it and try the other number", log: lg("Bad Number", v.s), flow: "3f",
       steps: [["Salesloft", "Mark this number as bad on the contact."], ["Salesloft", "Keep the cadence going on the other number."]] }; } },
     r_bad_no: { result: function (v) { return { title: "Remove this contact", log: lg("Bad Number", v.s), flow: "3f",
-      steps: [["Salesloft", "Mark the number bad and remove the contact from the cadence."], ["Salesloft", "Check the account for other contacts still in a cadence. If there are none, use the reject reason finder above."]] }; } },
+      steps: [["Salesloft", "Mark the number bad and remove the contact from the cadence."], ["Salesloft", "Check the account for other contacts still in a cadence. If there are none, pick the right reason from the reject reasons list above."]] }; } },
 
     gk: { q: "What did you get from the gatekeeper?", options: [
       { label: "The owner's name, a better number, or when they're usually in", next: "r_gk_info" },
@@ -950,7 +833,7 @@
     r_dnq: { result: { title: "Mark it Does Not Qualify", log: null, flow: "3i",
       steps: [["Salesloft", "Remove every contact on the account from their cadences."], ["Salesforce", "Mark the account Does Not Qualify. This is permanent."]] } },
     r_dnq_no: { result: { title: "Don't use Does Not Qualify", log: null, flow: "3i",
-      steps: [["Salesforce", "Temporarily Reject with the reason that fits (use the finder above). " + rejectNoteTxt], ["You", "If you're unsure, ask your manager."]] } },
+      steps: [["Salesforce", "Temporarily Reject with the reason that fits (see the reject reasons list above). " + rejectNoteTxt], ["You", "If you're unsure, ask your manager."]] } },
     r_tempclosed: { result: { title: "Temporarily Reject it", log: null, flow: "3i",
       steps: [["Salesloft", "Remove every contact from their cadences."], ["Salesforce", "Temporarily Reject with " + q(reason("Temp Closed")) + ". " + rejectNoteTxt]] } },
     r_churned: { result: { title: "Temporarily Reject it", log: null,
@@ -976,45 +859,14 @@
       steps: ["These calls don't count toward your prospecting numbers."] }; } }
   };
 
-  var REJECT = {
-    start: { q: "Is the restaurant closed for good, or should it never be sold to?", options: [
-      { label: "Yes", next: "r_dnq" }, { label: "No", next: "special" }
-    ] },
-    special: { q: "Does one of these fit?", options: [
-      { label: "Closed for now, reopening later", set: { r: "Temp Closed" }, next: "r" },
-      { label: "Used to be a Seated partner", set: { r: "Churned Partner" }, next: "r" },
-      { label: "Signed but never launched", set: { r: "Failed OB" }, next: "r" },
-      { label: "Took a demo, didn't sign", set: { r: "CL Opportunity (Held Demo)" }, next: "r" },
-      { label: "Booked a demo that never happened", set: { r: "CL Opportunity (Did Not Hold)" }, next: "r" },
-      { label: "Always full", set: { r: "Fully Booked (Lilia, 4 Charles, etc.)" }, next: "r" },
-      { label: "We couldn't understand each other", set: { r: "Language Barrier" }, next: "r" },
-      { label: "None of these", next: "talked" }
-    ] },
-    talked: { q: "Did you ever talk to the owner?", options: [
-      { label: "Yes, they said no", set: { r: "DM Connect, Not Interested" }, next: "r" },
-      { label: "Yes, they said not now", set: { r: "DM Connect, Timing Not Right" }, next: "r" },
-      { label: "Yes, they use a competitor", set: { r: C.usingCompetitorReason }, next: "r" },
-      { label: "Yes, then 5 callbacks with no answer", set: { r: "DM Connect, Failed to Reconnect" }, next: "r" },
-      { label: "No, but someone picked up", set: { r: "GK Connect, Unable to Reach DM" }, next: "r" },
-      { label: "No one ever picked up", set: { r: "Unable to connect to a human" }, next: "r" }
-    ] },
-    r_dnq: { result: { title: "Use Does Not Qualify", steps: [["Salesforce", "Mark the account Does Not Qualify. It's permanent, so only use it when the restaurant should never be sold to."]] } },
-    r: { result: function (v) {
-      var info = C.tempRejectReasons.filter(function (x) { return x.name === v.r; })[0] || {};
-      return { title: q(reason(v.r)), steps: [["Salesloft", "Make sure no contacts on the account are still in a cadence."], ["Salesforce", "Temporarily Reject the account with this reason. " + rejectNoteTxt]],
-        extra: el("p", { class: "hint", text: (info.use ? "Use it when: " + info.use + " " : "") + (info.notConfuse ? "Don't confuse it with " + info.notConfuse : "") }) };
-    } }
-  };
-
   // =====================================================================
   // TAB 2
   // =====================================================================
   var STORE_KEY = "repPlaybook.v1";
-  var state = { day: null, prepDemos: true, days: {}, cal: { connected: false } };
+  var state = { day: null, days: {}, cal: { connected: false } };
   var token = null, calMsg = null;
   function load() {
     try { var s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s && s.days) state = s; } catch (e) { /* storage blocked */ }
-    if (state.prepDemos == null) state.prepDemos = true;
     if (!state.cal) state.cal = { connected: false };
     if (!state.day) { var w = new Date().getDay(); state.day = (w >= 1 && w <= 5) ? w : 1; }
   }
@@ -1033,14 +885,25 @@
     d = d || state.day;
     if (!calFresh()) return [];
     var hidden = state.cal.hidden || [];
-    return ((state.cal.items || {})[d] || []).filter(function (it) { return hidden.indexOf(it.id) < 0; });
+    return ((state.cal.items || {})[d] || []).map(function (it) { it.ignored = hidden.indexOf(it.id) >= 0; return it; });
   }
-  function allItems(d) { d = d || state.day; return dayData(d).items.concat(calItems(d)); }
+  // Every meeting on the day, including ones the rep chose to ignore.
+  function listItems(d) { d = d || state.day; return dayData(d).items.concat(calItems(d)); }
+  // Only the meetings that block time.
+  function allItems(d) { return listItems(d).filter(function (it) { return !it.ignored; }); }
+  function setIgnored(it, on) {
+    if (it.source === "calendar") {
+      var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
+      if (on) h.push(it.id);
+      state.cal.hidden = h;
+    }
+    it.ignored = !!on;
+  }
   // ymd (optional): the real date being planned. Calendar events only apply to dates in the loaded week.
   function planFor(d, ymd) {
     var dd = dayData(d);
     var useCal = !ymd || !calFresh() || state.cal.week[d] === ymd;
-    var plan = L.buildDay({ day: d, items: useCal ? allItems(d) : dd.items, prepDemos: state.prepDemos });
+    var plan = L.buildDay({ day: d, items: useCal ? allItems(d) : dd.items, });
     return { plan: plan, est: L.estimate(plan, dd.callbacksDue, dd.dialTarget), target: dd.dialTarget };
   }
 
@@ -1062,20 +925,31 @@
     var rows = dd.items.map(function (it, i) { return { it: it, i: i }; }).concat(calItems().map(function (it) { return { it: it, cal: true }; }));
     rows.sort(function (a, b) { return a.it.start - b.it.start; }).forEach(function (o) {
       var it = o.it;
-      var sel = el("select", { "aria-label": "Type for " + it.label });
+      var sel = el("select", { "aria-label": "How to treat " + it.label });
       sel.appendChild(el("option", { value: "meeting", text: "Meeting" }));
       sel.appendChild(el("option", { value: "callback", text: "Agreed callback" }));
-      sel.value = it.type;
-      sel.addEventListener("change", function () { it.type = sel.value; if (it.type === "callback") it.end = it.start + 15; else if (it.end <= it.start + 15 && it.origEnd) it.end = it.origEnd; save(); renderDay(); });
-      if (o.cal && it.origEnd == null) it.origEnd = it.end;
+      sel.appendChild(el("option", { value: "ignore", text: "Ignore (call during it)" }));
+      sel.value = it.ignored ? "ignore" : it.type;
+      if (it.origEnd == null) it.origEnd = it.end;
+      sel.addEventListener("change", function () {
+        if (sel.value === "ignore") { setIgnored(it, true); }
+        else {
+          setIgnored(it, false);
+          it.type = sel.value;
+          if (it.type === "callback") it.end = it.start + 15; else if (it.origEnd) it.end = it.origEnd;
+        }
+        save(); renderDay();
+      });
       var t = it.type === "callback" ? L.fmt(it.start) : L.fmtRange(it.start, it.end);
-      ul.appendChild(el("li", null, [
-        el("span", null, [el("strong", { text: t }), " " + it.label, L.demoKind(it) ? el("span", { class: "src-tag demo-tag", text: L.demoKind(it) }) : null, o.cal ? el("span", { class: "src-tag", text: "Calendar" }) : null]),
+      var del = o.cal ? el("span", { "aria-hidden": "true" }) :
+        el("button", { class: "icon-btn", type: "button", "aria-label": "Remove " + it.label + " at " + t, title: "Remove", text: "\u00d7", onclick: function () { dd.items.splice(o.i, 1); save(); renderDay(); } });
+      ul.appendChild(el("li", { class: it.ignored ? "ignored" : null }, [
+        el("span", null, [el("strong", { text: t }), " " + it.label,
+          L.demoKind(it) ? el("span", { class: "src-tag demo-tag", text: L.demoKind(it) }) : null,
+          o.cal ? el("span", { class: "src-tag", text: "Calendar" }) : null,
+          it.ignored ? el("span", { class: "hint", style: "display:block;margin:0", text: "Ignored: this time is calling time." }) : null]),
         sel,
-        el("button", { class: "icon-btn", type: "button", "aria-label": (o.cal ? "Ignore " : "Remove ") + it.label + " at " + t, title: o.cal ? "Ignore this calendar event in your plan" : "Remove", text: "\u00d7", onclick: function () {
-          if (o.cal) { state.cal.hidden = (state.cal.hidden || []).concat([it.id]); } else { dd.items.splice(o.i, 1); }
-          save(); renderDay();
-        } })
+        del
       ]));
     });
   }
@@ -1148,74 +1022,35 @@
     return msgs;
   }
 
-  function renderResults(plan) {
-    var dd = dayData();
-    var est = L.estimate(plan, dd.callbacksDue, dd.dialTarget);
-    var ch = $("changes"); ch.innerHTML = "";
-    ch.appendChild(el("h3", { text: dd.items.length ? "What changed today" : "Your day" }));
-    var ul = el("ul"); describeChanges(plan, est).forEach(function (m) { ul.appendChild(el("li", { text: m })); }); ch.appendChild(ul);
-
+  function renderResults(cur) {
+    var plan = cur.plan, est = cur.est, dd = dayData();
     var box = $("results"); box.innerHTML = "";
     box.appendChild(el("h3", { style: "margin-top:0;font-family:var(--serif);font-size:1.2rem", text: "What your dials should get you" }));
     box.appendChild(el("div", { class: "big", text: est.expected.toFixed(1) }));
     var whole = Math.round(est.expected);
-    var sentence = whole === 0 ? "On a typical day this is less than one meeting. Callbacks are the fastest way to raise it."
-      : "Expected meetings today. On a typical day this is about " + whole + (whole === 1 ? " meeting" : " meetings") + ", and some days " + (whole + 1) + " or more.";
-    box.appendChild(el("p", { class: "sentence", text: sentence }));
+    box.appendChild(el("p", { class: "sentence", text: whole === 0 ? "Expected meetings today. That's less than one, so lean on your callbacks."
+      : "Expected meetings today. On a typical day that's about " + whole + (whole === 1 ? " meeting" : " meetings") + ", and some days " + (whole + 1) + " or more." }));
+    var dials = Math.round(Math.min(dd.dialTarget, est.capacity));
+    var focusMin = Math.round(dials / C.dialsPerHour * 60 / 5) * 5;
+    if (focusMin > 0) box.appendChild(el("p", { class: "sentence", text: dials + " dials at " + C.dialsPerHour + " an hour is about " + L.dur(focusMin) + " of focused dialing. The calendar shows when to call which numbers." }));
     if (est.overCapacity) box.appendChild(el("div", { class: "warn", text: "You have room for about " + est.capacity + " dials today. Expected meetings are based on " + est.capacity + "." }));
-    if (est.rows.length) {
-      var tb = el("tbody");
-      est.rows.forEach(function (r) { tb.appendChild(el("tr", null, [el("td", { text: r.label }), el("td", { text: String(Math.round(r.dials)) }), el("td", { text: pct(r.rate, 1) }), el("td", { text: r.expected.toFixed(2) })])); });
-      box.appendChild(el("div", { class: "table-scroll" }, [el("table", null, [el("thead", null, [el("tr", null, [el("th", { text: "Block" }), el("th", { text: "Dials" }), el("th", { text: "Books a demo" }), el("th", { text: "Expected meetings" })])]), tb])]));
-    }
-    var inp = el("input", { type: "number", min: "1", max: "20", value: String(box.dataset.want || 2), id: "want", "aria-label": "Meetings you want to book" });
-    var out = el("span");
-    function upd() {
-      var want = Math.max(1, Number(inp.value) || 1); box.dataset.want = want;
-      var need = L.dialsFor(want, est);
-      if (!need) { out.textContent = "Add some dials to see this."; return; }
-      out.textContent = "you'd need about " + need + " dials" + (need > est.capacity ? ". That's more than today's room for about " + est.capacity + ", so it would take more than one day." : ".");
-    }
-    inp.addEventListener("input", upd);
-    box.appendChild(el("div", { class: "reverse" }, [el("label", { for: "want", style: "margin:0", text: "To book" }), inp, el("span", { text: "meetings today," }), out]));
-    upd();
     box.appendChild(el("p", { class: "nudge", text: "Each callback dial is worth about 4 cold dials. Don't skip them." }));
   }
 
-  function renderHelper() {
-    var zSel = $("h-zone");
-    if (!zSel.options.length) C.zones.forEach(function (z) { zSel.appendChild(el("option", { value: z.name, text: z.name })); });
-    var zone = zoneByName(zSel.value), line = $("h-line").value;
-    var out = $("helper-out"); out.innerHTML = "";
-    out.appendChild(el("p", { class: "hint", text: "Offer these times. Then make 5 callbacks on business days " + C.followUpDays.join(", ") + " after you talk." }));
-    var tb = el("tbody"), today = new Date();
-    [1, 2].forEach(function (dn) {
-      var d = L.addBusinessDays(today, dn);
-      [1, 2].forEach(function (n) {
-        var w = L.callbackWindow(line, zone, n);
-        var key = w ? w.etStart + "-" + w.etEnd : "none";
-        if (n === 2 && tb.lastChild && tb.lastChild.dataset.key === key) return;
-        var wd = d.getDay(), open = "\u2014";
-        if (w && wd >= 1 && wd <= 5) { var f = L.firstFreeIn(planFor(wd, L.tzParts(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12)).ymd).plan, w); open = f == null ? "Booked up" : L.fmt(f) + " ET"; }
-        var tr = el("tr", null, [el("td", { text: n === 1 ? L.fmtDate(d) : "" }), el("td", { text: w ? w.part + ": " + L.windowText(w, zone) : "No good window today" }), el("td", { text: open })]);
-        tr.dataset.key = key; tb.appendChild(tr);
-      });
-    });
-    out.appendChild(el("div", { class: "table-scroll" }, [el("table", null, [el("thead", null, [el("tr", null, [el("th", { text: "Day" }), el("th", { text: "Best times" }), el("th", { text: "Your first open slot" })])]), tb])]));
-    if (line === "restaurant") out.appendChild(el("p", { class: "hint", text: "Never during lunch rush or after 5:00 PM in their time zone." }));
-  }
-
-  function renderSuggestions(cur) {
-    var box = $("suggestions"); box.innerHTML = "";
-    var week = {};
-    for (var d = 1; d <= 5; d++) week[d] = d === state.day ? cur : planFor(d);
-    var list = L.suggest({ plan: cur.plan, est: cur.est, items: allItems(), day: state.day, week: week, dialTarget: cur.target });
+  function renderToday(cur) {
+    var box = $("today"); box.innerHTML = "";
+    var tips = L.suggest({ plan: cur.plan, est: cur.est, items: allItems(), day: state.day }).map(function (x) { return x.text; });
     var allDay = calFresh() ? ((state.cal.allDay || {})[state.day] || []) : [];
-    allDay.forEach(function (a) { list.unshift({ text: (a.outOfOffice ? "You're marked out of office: " : "All-day event: ") + q(a.label) + ". If you're not calling today, ignore this plan." }); });
-    if (!list.length) { box.hidden = true; return; }
-    box.hidden = false;
-    box.appendChild(el("h3", { text: "Suggestions" }));
-    var ul = el("ul"); list.forEach(function (x) { ul.appendChild(el("li", { text: x.text })); }); box.appendChild(ul);
+    allDay.forEach(function (a) { tips.unshift((a.outOfOffice ? "You're marked out of office: " : "All-day event: ") + q(a.label) + ". If you're not calling today, ignore this plan."); });
+    var ignored = listItems().filter(function (it) { return it.ignored; }).map(function (it) {
+      return "Ignoring " + q(it.label) + " (" + (it.type === "callback" ? L.fmt(it.start) : L.fmtRange(it.start, it.end)) + "). That time is calling time.";
+    });
+    var notes = ignored.concat(describeChanges(cur.plan, cur.est));
+    box.appendChild(el("h3", { text: "Today" }));
+    var ul = el("ul");
+    tips.forEach(function (t) { ul.appendChild(el("li", { class: "tip", text: t })); });
+    notes.forEach(function (t) { ul.appendChild(el("li", { text: t })); });
+    box.appendChild(ul);
   }
 
   // ---------- Google Calendar ----------
@@ -1223,7 +1058,7 @@
   function renderCalBox() {
     var box = $("cal-box"); if (!box) return; box.innerHTML = "";
     if (!C.googleClientId) {
-      box.appendChild(el("p", { class: "hint", text: "Calendar connection isn't set up yet. Your manager adds it once (see the README). Until then, paste or add your meetings below." }));
+      box.appendChild(el("p", { class: "hint", text: "Calendar connection isn't set up yet. Your manager adds it once (see the README). Until then, add your meetings below." }));
       return;
     }
     if (calMsg) box.appendChild(el("p", { class: "cal-status" + (calMsg.err ? " err" : ""), text: calMsg.text }));
@@ -1232,7 +1067,6 @@
       var w = state.cal.week, n = Object.keys(state.cal.items || {}).reduce(function (a, k) { return a + state.cal.items[k].length; }, 0);
       if (!calMsg) box.appendChild(el("p", { class: "cal-status", text: "Showing " + n + (n === 1 ? " meeting" : " meetings") + " from your Google Calendar for " + fmtYmd(w[1]) + "\u2013" + fmtYmd(w[5]) + ". Updated " + new Date(state.cal.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "." }));
       actions.appendChild(el("button", { class: "btn", type: "button", text: "Refresh", onclick: function () { if (token) fetchWeek(); else connect(); } }));
-      if ((state.cal.hidden || []).length) actions.appendChild(el("button", { class: "btn", type: "button", text: "Show ignored events", onclick: function () { state.cal.hidden = []; save(); renderDay(); } }));
       actions.appendChild(el("button", { class: "btn", type: "button", text: "Disconnect", onclick: disconnect }));
     } else {
       if (!calMsg) box.appendChild(el("p", { class: "hint", text: state.cal.connected ? "Reconnect to load this week's meetings." : "Pull this week's meetings in automatically. Read-only: the site can see your events but can't change them, and they stay in this browser." }));
@@ -1310,28 +1144,17 @@
     var dd = dayData();
     $("callbacks-due").value = dd.callbacksDue;
     $("dial-target").value = dd.dialTarget;
-    $("prep-demos").checked = !!state.prepDemos;
     renderItems();
     var cur = planFor(state.day);
     renderCalendar(cur.plan);
-    renderResults(cur.plan);
-    renderSuggestions(cur);
+    renderToday(cur);
+    renderResults(cur);
     renderCalBox();
-    renderHelper();
   }
 
   function initDay() {
     load();
-    $("prep-label").textContent = "Add " + C.demoPrepMinutes + " minutes of prep before each demo";
     renderLegend();
-    $("paste-add").addEventListener("click", function () {
-      var r = L.parseMeetings($("paste").value), errs = $("paste-errors");
-      errs.innerHTML = "";
-      r.errors.forEach(function (e) { errs.appendChild(el("li", { text: q(e.line) + ": " + e.msg + " Try a format like 10:00-10:30 Demo or 2pm - 2:45pm Team meeting." })); });
-      if (r.items.length) { Array.prototype.push.apply(dayData().items, r.items); save(); }
-      $("paste").value = r.errors.map(function (e) { return e.line; }).join("\n");
-      renderDay();
-    });
     $("add-one").addEventListener("click", function () {
       var errs = $("add-errors"); errs.innerHTML = "";
       var s = $("add-start").value, e = $("add-end").value, label = $("add-label").value.trim(), type = $("add-type").value;
@@ -1342,17 +1165,13 @@
       dayData().items.push({ start: start, end: end, label: label || (type === "callback" ? "Callback" : "Meeting"), type: type });
       save(); $("add-label").value = ""; renderDay();
     });
-    $("prep-demos").addEventListener("change", function () { state.prepDemos = this.checked; save(); renderDay(); });
     $("callbacks-due").addEventListener("input", function () { dayData().callbacksDue = Math.max(0, Number(this.value) || 0); save(); renderDay(); this.focus(); });
     $("dial-target").addEventListener("input", function () { dayData().dialTarget = Math.max(0, Number(this.value) || 0); save(); renderDay(); this.focus(); });
     $("clear-day").addEventListener("click", function () {
-      if (!confirm("Clear all meetings and numbers for " + DAYS[state.day] + "?")) return;
-      delete state.days[state.day]; save(); $("paste-errors").innerHTML = ""; renderDay();
+      if (!confirm("Clear the meetings you added and your numbers for " + DAYS[state.day] + "?")) return;
+      delete state.days[state.day]; save(); renderDay();
     });
-    $("h-zone").addEventListener("change", renderHelper);
-    $("h-line").addEventListener("change", renderHelper);
     renderDay();
-    renderHelper();
   }
 
   // =====================================================================
@@ -1366,9 +1185,8 @@
   }
   window.addEventListener("hashchange", function () { showTab(); window.scrollTo(0, 0); });
 
-  renderAutoBox(); renderFlow(); renderCheat(); renderRejectTable(); renderCallbackRule(); renderWhy(); renderGlossary();
+  renderAutoBox(); renderFlow(); renderCheat(); renderRejectTable(); renderCallbacks();
   new Wizard($("sim"), SIM, "start");
-  new Wizard($("reject-wizard"), REJECT, "start");
   initDay();
   showTab();
 })();

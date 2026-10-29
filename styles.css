@@ -122,15 +122,7 @@ ul.rules li { margin: 6px 0; }
 .stat { border-top: 1px solid var(--ink); padding-top: 10px; }
 .stat .big { font-family: var(--serif); font-size: 2.6rem; line-height: 1; font-weight: 600; }
 .stat p { margin: 8px 0 0; color: var(--ink-soft); }
-.bars { max-width: 560px; margin: 18px 0; }
-.bar-row { display: grid; grid-template-columns: 120px 1fr 48px; gap: 10px; align-items: center; margin: 6px 0; font-size: 0.93rem; }
-.bar-track { background: var(--surface); height: 14px; border-radius: 3px; overflow: hidden; }
-.bar-fill { height: 100%; background: var(--green); }
-.closer { font-family: var(--serif); font-size: 1.35rem; margin: 18px 0 0; }
 
-/* ---------- Glossary ---------- */
-dl.glossary dt { font-weight: 700; margin-top: 12px; }
-dl.glossary dd { margin: 2px 0 0; color: var(--ink-soft); max-width: 75ch; }
 
 /* ---------- Wizard ---------- */
 .wizard { border: 2px solid var(--ink); border-radius: var(--radius-lg); padding: 24px; background: var(--paper); }
@@ -168,15 +160,11 @@ ol.checklist .tag { font-size: 0.75rem; font-weight: 700; padding: 1px 8px; bord
 .panel h3 { margin-top: 0; font-family: var(--serif); font-size: 1.2rem; }
 label { font-weight: 600; display: block; margin: 12px 0 4px; font-size: 0.93rem; }
 .hint { font-size: 0.85rem; color: var(--ink-soft); margin: 2px 0 6px; }
-input[type="number"], input[type="time"], input[type="text"], select, textarea {
-  font: inherit; width: 100%; padding: 8px 10px; border: 1px solid #c9c4d1; border-radius: var(--radius-sm); background: var(--paper); color: var(--ink);
-}
-textarea { min-height: 96px; resize: vertical; }
-.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
-.check input { margin-top: 5px; }
+input[type="number"], input[type="time"], input[type="text"], select, .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .items { list-style: none; padding: 0; margin: 12px 0 0; }
 .items li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 0.93rem; }
+.items li.ignored > span:first-child { color: var(--ink-soft); }
+.items li.ignored strong { text-decoration: line-through; }
 .items select { width: auto; padding: 4px 6px; font-size: 0.85rem; }
 .icon-btn { font: inherit; background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; padding: 2px 9px; color: var(--ink-soft); }
 .errors { list-style: none; padding: 0; margin: 8px 0 0; }
@@ -186,12 +174,9 @@ textarea { min-height: 96px; resize: vertical; }
 .changes h3 { margin: 0 0 6px; font-size: 1rem; }
 .changes ul { margin: 0; padding-left: 1.2em; }
 .changes li { margin: 4px 0; }
+.changes li.tip { font-weight: 600; }
+.changes li.tip::marker { color: var(--blue); }
 
-.suggestions { border: 2px solid var(--blue); border-radius: var(--radius-sm); padding: 14px 18px; margin-bottom: 18px; background: var(--blue-bg); }
-.suggestions[hidden] { display: none; }
-.suggestions h3 { margin: 0 0 6px; font-size: 1rem; }
-.suggestions ul { margin: 0; padding-left: 1.2em; }
-.suggestions li { margin: 6px 0; }
 .cal-status { margin: 0 0 10px; }
 .cal-status.err { color: var(--red); }
 .cal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -228,11 +213,8 @@ textarea { min-height: 96px; resize: vertical; }
 .results .big { font-family: var(--serif); font-size: 3.2rem; line-height: 1; font-weight: 600; }
 .results .sentence { margin: 6px 0 14px; color: var(--ink-soft); }
 .warn { background: var(--warn-bg); border: 1px solid #e8c25a; border-radius: var(--radius-sm); padding: 10px 14px; margin: 12px 0; }
-.reverse { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
-.reverse input { width: 80px; }
 .nudge { margin-top: 14px; font-weight: 600; color: var(--green); }
 
-.helper-out table { margin-top: 10px; }
 
 .footer-note { color: var(--ink-soft); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 40px; }
 
