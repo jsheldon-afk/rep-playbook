@@ -640,11 +640,11 @@
     var box = $("callbacks");
     var s = C.callbackSpeedDemoRate;
     box.appendChild(el("div", { class: "stats" }, [
-      el("div", { class: "stat" }, [el("div", { class: "big", text: C.callbackVsColdMultiple + "\u00d7" }), el("p", { text: "A callback is about " + C.callbackVsColdMultiple + " times more likely to book a demo than a first cold dial." })]),
+      el("div", { class: "stat" }, [el("div", { class: "big", text: C.callbackVsColdMultiple + "\u00d7" }), el("p", { text: "A callback is about " + C.callbackVsColdMultiple + " times more likely to book a demo than a cold dial." })]),
       el("div", { class: "stat" }, [el("div", { class: "big", text: pct(s.withinOneDay) }), el("p", { text: "of callbacks made within a day book a demo. After 3 days it's about " + pct(s.overThreeDays) + "." })]),
       el("div", { class: "stat" }, [el("div", { class: "big", text: pct(C.callbacksNeverCalledShare) }), el("p", { text: "of callback requests last quarter never got a second call." })])
     ]));
-    box.appendChild(el("p", { class: "lede", text: "Every owner you talked to who didn't book or say no gets " + C.callbackDials + " callbacks, on a mobile or a restaurant line." }));
+    box.appendChild(el("p", { class: "lede", html: "The daily goal is <strong>" + C.goalColdDials + " and " + C.goalCallbacks + "</strong>: " + C.goalColdDials + " cold dials and " + C.goalCallbacks + " callbacks. Every owner you talked to who didn't book or say no gets " + C.callbackDials + " callbacks, on a mobile or a restaurant line." }));
     var tl = el("div", { class: "timeline" });
     C.followUpDays.forEach(function (d, i) {
       tl.appendChild(el("div", null, [el("strong", { text: "Callback " + (i + 1) }), el("span", { text: "Business day " + d + ", " + (i % 2 === 0 ? "earlier" : "later") + " in the day" })]));
@@ -1193,7 +1193,7 @@
   }
   function renderTaskCheck(cur) {
     var dd = dayData(), box = $("task-check"); box.innerHTML = "";
-    var r = C.bookingRatePerDial, dph = C.dialsPerHour, goal = C.dailyMeetingGoal;
+    var r = C.bookingRatePerDial, dph = C.dialsPerHour;
     var cf = $("callback-field"); cf.innerHTML = "";
     var cbs = callbackCount();
     cf.appendChild(el("span", { style: "font-weight:600;font-size:0.93rem;display:block;margin:12px 0 4px", text: "Callback tasks" }));
@@ -1206,19 +1206,28 @@
     var coldUsed = chk.dials - cbs;
     var usedMin = Math.round(coldUsed / dph * 60);
 
-    // 1) The goal: are they on track for 2 meetings today?
-    var onTrack = chk.expected >= goal - 0.05;
-    var coldRate = (r.mobileBlock + r.restaurantBlock) / 2;
-    var needDials = Math.max(0, Math.ceil((goal - cbs * r.callback) / coldRate));
-    var needMin = Math.ceil(needDials / dph * 60 / 15) * 15;
+    // 1) The goal: "120 and 10" (120 cold dials and 10 callbacks)
+    var gC = C.goalColdDials, gB = C.goalCallbacks;
+    var coldTasks = dd.mobileTasks + dd.restaurantTasks;
+    var coldPlanned = chk.dials - cbs;
+    var capDials = Math.floor(bookedMin / 60 * dph);
+    var onTrack = coldPlanned >= gC && cbs >= gB;
     var head = el("div", { class: "verdict " + (onTrack ? "good" : "short") });
-    head.appendChild(el("div", { style: "font-size:1.1rem", text: onTrack
-      ? "You're on track for " + chk.expected.toFixed(1) + " meetings today. The goal is " + goal + "."
-      : "You're on track for " + chk.expected.toFixed(1) + " meetings today. The goal is " + goal + "." }));
-    if (!onTrack) head.appendChild(el("div", { style: "margin-top:6px;font-weight:400", text:
-      "To hit " + goal + ", you need about " + needDials + " cold calls" + (cbs ? " on top of your " + cbs + (cbs === 1 ? " callback" : " callbacks") : "") +
-      ", which is about " + L.dur(needMin) + " of calling time. You have " + (bookedMin ? L.dur(bookedMin) : "no calling time") + " on your calendar and " +
-      (dd.mobileTasks + dd.restaurantTasks) + " call tasks." }));
+    head.appendChild(el("div", { style: "font-size:1.1rem", text: "Today's goal: " + gC + " and " + gB + ". You're set up for " + coldPlanned + " cold " + (coldPlanned === 1 ? "dial" : "dials") + " and " + cbs + (cbs === 1 ? " callback." : " callbacks.") }));
+    var gaps = [];
+    if (coldTasks < gC) gaps.push("Pull " + (gC - coldTasks) + " more cold calls from your cadences.");
+    if (capDials < gC) gaps.push("Book about " + L.dur(Math.ceil((gC - capDials) / dph * 60 / 15) * 15) + " more calling time on your calendar" + (bookedMin ? "" : " (you have none yet)") + ".");
+    if (cbs < gB) gaps.push((gB - cbs) + (gB - cbs === 1 ? " callback" : " callbacks") + " short. Callbacks come from owner conversations: set a Nooks reminder for every \u201ccall me back.\u201d");
+    if (gaps.length) {
+      var ulg = el("ul", { class: "goal-gaps" });
+      gaps.forEach(function (g) { ulg.appendChild(el("li", { text: g })); });
+      head.appendChild(ulg);
+      var addCold = Math.max(0, gC - coldPlanned), addCb = Math.max(0, gB - cbs);
+      var gain = addCold * (r.mobileBlock + r.restaurantBlock) / 2 + addCb * r.callback;
+      if (gain > 0) head.appendChild(el("div", { style: "margin-top:6px;font-weight:400", text: "Hitting " + gC + " and " + gB + ": " + payoff(gain, addCold + addCb) }));
+    } else {
+      head.appendChild(el("div", { style: "margin-top:6px;font-weight:400", text: "You're set up to hit it. Work every callback within a day." }));
+    }
     box.appendChild(head);
 
     // 2) Calling time: available vs. used
@@ -1275,8 +1284,8 @@
     // 5) Summary numbers and how they're calculated
     var focusMin = Math.round(chk.dials / dph * 60 / 5) * 5;
     box.appendChild(el("div", { class: "task-summary" }, [
-      el("div", null, [el("div", { class: "big" + (onTrack ? "" : " bad-num"), text: chk.expected.toFixed(1) }), el("div", { class: "hint", text: "expected meetings (goal " + goal + ")" })]),
-      el("div", null, [el("div", { class: "big", text: String(chk.dials) }), el("div", { class: "hint", text: "dials (team target " + C.defaultDialTarget + ")" })]),
+      el("div", null, [el("div", { class: "big", text: chk.expected.toFixed(1) }), el("div", { class: "hint", text: "expected meetings" })]),
+      el("div", null, [el("div", { class: "big" + (coldPlanned >= gC ? "" : " bad-num"), text: coldPlanned + " + " + cbs }), el("div", { class: "hint", text: "cold dials + callbacks (goal " + gC + " + " + gB + ")" })]),
       el("div", null, [el("div", { class: "big", text: L.dur(focusMin).replace(" hours", "h").replace(" hour", "h").replace(" minutes", "m") }), el("div", { class: "hint", text: "of focused dialing at " + dph + " an hour" })])
     ]));
     var how = el("details", { class: "collapsible" }, [el("summary", { text: "How expected meetings are calculated" })]);

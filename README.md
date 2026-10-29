@@ -63,7 +63,9 @@ Calling time a rep blocks on their own calendar ("Call block", "Power hour", "Di
 
 Change the callback words in `callbackRules` in `config.js`.
 
-## The daily plan
+## The daily goal and plan
+The goal is "120 and 10": 120 cold dials and 10 callbacks a day (`goalColdDials`, `goalCallbacks` in `config.js`). The My day tab shows whether each rep's tasks, calendar and callbacks get them there.
+
 Non-calling time is: meetings (from the calendar), demo prep (10 minutes before each demo), day organization prep (9:00), cold call bot practice (30 minutes, every rep, every day, 9:30 by default), a 45-minute lunch (12:30), two 15-minute breaks (2:45 and 5:00) and cleaning leads (5:15). If a meeting covers bot practice, the site moves it to the nearest free half hour. Times and lengths are in the `defaultDay`, `thuFriDay` and `reflow` settings in `config.js`.
 
 ## Changing numbers, names or times

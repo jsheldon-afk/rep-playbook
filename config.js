@@ -3,8 +3,10 @@
  * Everything the site shows or calculates lives here, so a manager can update it
  * without touching app.js. Keep names spelled EXACTLY as they appear in Nooks and Salesforce.
  *
- * Source for every rate below: Seated calls library, Jul 31 - Oct 28 2026,
- * team-level, cold prospecting calls (existing-opp, billing and internal calls removed).
+ * Source for every rate below: Seated calls library, Jul 31 - Oct 28 2026, based on 8 reps:
+ * Eliana, Jack, Hector, Madeleine, acenteno, dregan, Joe and nburroughs.
+ * Cold rates count cadence dials within the caps (3 tries on a mobile, 5 on a restaurant line);
+ * existing-opp, billing and internal calls removed.
  */
 window.CONFIG = {
   // ---------- Time ----------
@@ -63,28 +65,30 @@ window.CONFIG = {
 
   // ---------- Dialing ----------
   dialsPerHour: 45,        // Team target. Calls library, 90 days: about 40-50 per active hour (power 45, parallel 74)
-  defaultDialTarget: 120,  // Team daily target
+  defaultDialTarget: 120,  // kept for compatibility; the daily goal is below
   callingDaysPerMonth: 21, // for "a month" payoffs
-  dailyMeetingGoal: 2,     // meetings booked per rep per day
+  // The daily goal: "120 and 10" = 120 cold dials and 10 callbacks.
+  goalColdDials: 120,
+  goalCallbacks: 10,
   dialsPerCallbackToday: 1,
   demoPrepMinutes: 10,
 
-  // Share of dials that book a demo, by block. Source: calls library, Jul 31 - Oct 28 2026.
+  // Share of dials that book a demo, by kind of dial (8-rep base, see top of file).
   bookingRatePerDial: {
-    callback: 0.041,            // any callback dial
-    agreedCallback: 0.067,      // first callback dial (owner picked the time)
-    missedMeetingRebook: 0.030,
-    mobileBlock: 0.012,
-    restaurantBlock: 0.010,
-    restaurantPrime: 0.0115
+    callback: 0.0357,           // any callback dial (1,036 dials)
+    agreedCallback: 0.0357,
+    missedMeetingRebook: 0.030, // team-wide; too few rebooks in the 8-rep base
+    mobileBlock: 0.0142,        // 6,049 mobile dials, 1.42%
+    restaurantBlock: 0.010,     // 6,692 restaurant-line dials, 1.00%
+    restaurantPrime: 0.0115     // team-wide 3:30-5:00 rate
   },
 
   // ---------- Callback facts ----------
-  callbackSpeedDemoRate: { withinOneDay: 0.18, oneToThreeDays: 0.14, overThreeDays: 0.10, never: 0 },
-  callbackVsColdMultiple: 5,
+  callbackSpeedDemoRate: { withinOneDay: 0.158, oneToThreeDays: 0.113, overThreeDays: 0.094, never: 0 },
+  callbackVsColdMultiple: 3,      // 3.57% per callback dial vs 1.20% per cold dial
   firstCallbackDemoRate: 0.067,
   firstColdDialDemoRate: 0.014,
-  callbacksNeverCalledShare: 0.37,
+  callbacksNeverCalledShare: 0.31,
   callbackFirstTryPickupShare: 0.56,
   callbackDials: 5,
   followUpDays: [1, 2, 4, 6, 9],      // business days after the conversation

@@ -180,6 +180,8 @@ input[type="number"], input[type="time"], input[type="text"], select, .row { dis
 .verdict.short { background: var(--red-bg); color: var(--red); }
 .verdict.idle { background: var(--warn-bg); }
 .verdict.good { background: var(--green-bg); color: var(--green); }
+.goal-gaps { margin: 8px 0 0; padding-left: 1.2em; font-weight: 400; }
+.goal-gaps li { margin: 3px 0; }
 .util { margin: 10px 0 0; }
 .task-summary .big.bad-num { color: var(--red); }
 .task-summary { display: flex; flex-wrap: wrap; gap: 24px; align-items: baseline; margin-top: 14px; }
