@@ -62,6 +62,11 @@
   <div class="tab-panel" id="panel-day" role="region" aria-labelledby="tab-day" hidden>
     <p class="tab-intro">Enter today's call tasks. You'll see whether the calling time on your calendar fits them, and a plan for when to call which numbers.</p>
 
+    <div class="panel" id="cal-panel">
+      <h3>Google Calendar</h3>
+      <div id="cal-box" aria-live="polite"></div>
+    </div>
+
     <div class="day-toggle" id="day-toggle" role="group" aria-label="Pick a day"></div>
 
     <div class="panel tasks" id="tasks">
@@ -75,34 +80,11 @@
       <div id="task-check" aria-live="polite"></div>
     </div>
 
-    <div class="day-grid">
+    <div class="day-grid" id="day-main">
       <div>
-        <div class="panel" id="cal-panel">
-          <h3>Google Calendar</h3>
-          <div id="cal-box" aria-live="polite"></div>
-        </div>
-
         <div class="panel">
           <h3>Today's meetings</h3>
           <p class="hint" id="items-hint"></p>
-          <div id="manual-add">
-          <p class="hint">Times in Eastern.</p>
-          <div class="row">
-            <div><label for="add-start">Start (ET)</label><input type="time" id="add-start" step="300"></div>
-            <div><label for="add-end">End (ET)</label><input type="time" id="add-end" step="300"></div>
-          </div>
-          <label for="add-label">What is it?</label>
-          <input type="text" id="add-label" placeholder="Demo">
-          <label for="add-type">Type</label>
-          <select id="add-type">
-            <option value="meeting">Meeting</option>
-            <option value="callback">Agreed callback (owner picked the time, 15 min)</option>
-          </select>
-          <p class="hint">For an agreed callback you only need the start time.</p>
-          <button class="btn" id="add-one" type="button" style="margin-top:10px">Add to my day</button>
-          <ul class="errors" id="add-errors" aria-live="polite"></ul>
-
-          </div>
           <ul class="items" id="items" aria-label="Today's meetings"></ul>
         </div>
 
