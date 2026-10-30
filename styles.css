@@ -384,3 +384,13 @@ input[type="number"], input[type="time"], input[type="text"], select, .row { dis
   .stat-num { font-size: 1.4rem; }
   .connect-card { padding: 28px 18px; }
 }
+
+.rga-line { margin: 6px 0 8px; }
+.rga-top { display: flex; align-items: baseline; gap: 8px; font-size: 0.86rem; }
+.rga-top span:first-child { flex: 1; color: var(--ink-soft); }
+.rga-top strong { font-family: var(--serif); font-size: 1.15rem; }
+.rga-mins { color: var(--ink-soft); font-size: 0.8rem; min-width: 5.5em; text-align: right; }
+.rga-line .rga-meter { height: 8px; margin: 4px 0 0; max-width: none; }
+.rga-line.now .rga-fill { background: var(--green); }
+.rga-line.opt .rga-fill { background: repeating-linear-gradient(135deg, #8fc4b3 0, #8fc4b3 6px, #b9dccf 6px, #b9dccf 12px); }
+.rga-line.now .rga-top strong { color: var(--green); }

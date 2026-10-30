@@ -200,6 +200,25 @@
     return { rga: rga, non: non, share: rga / Math.max(1, rga + non) };
   };
 
+  // RGA from what's actually on the calendar right now: calling blocks the rep has booked
+  // (minus meetings inside them) plus demos and follow-ups. calBlocks: [{start,end,kind}], items: counted events.
+  L.currentRGA = function (calBlocks, items) {
+    var d0 = L.toMin(C.dayStart), d1 = L.toMin(C.dayEnd), n = d1 - d0;
+    var rga = new Array(n), busy = new Array(n);
+    function mark(arr, a, b, v) { for (var t = Math.max(a, d0); t < Math.min(b, d1); t++) arr[t - d0] = v; }
+    (items || []).forEach(function (it) {
+      if (it.type !== "meeting") return;
+      mark(busy, it.start, it.end, true);
+      if (L.isDemo(it)) mark(rga, it.start, it.end, true);
+    });
+    (calBlocks || []).forEach(function (b) {
+      if (b.kind === "other") return;
+      for (var t = Math.max(b.start, d0); t < Math.min(b.end, d1); t++) if (!busy[t - d0]) rga[t - d0] = true;
+    });
+    var m = 0; for (var i = 0; i < n; i++) if (rga[i]) m++;
+    return { rga: m, total: n, share: m / n };
+  };
+
   // Group slots into calendar blocks.
   // Revenue generating activity: talking to prospects. Calling blocks, demos and follow-ups.
   L.isRGA = function (slot) {
@@ -211,6 +230,25 @@
     var rga = 0, non = 0;
     plan.slots.forEach(function (s) { if (L.isRGA(s)) rga += C.slotMinutes; else non += C.slotMinutes; });
     return { rga: rga, non: non, share: rga / Math.max(1, rga + non) };
+  };
+
+  // RGA from what's actually on the calendar right now: calling blocks the rep has booked
+  // (minus meetings inside them) plus demos and follow-ups. calBlocks: [{start,end,kind}], items: counted events.
+  L.currentRGA = function (calBlocks, items) {
+    var d0 = L.toMin(C.dayStart), d1 = L.toMin(C.dayEnd), n = d1 - d0;
+    var rga = new Array(n), busy = new Array(n);
+    function mark(arr, a, b, v) { for (var t = Math.max(a, d0); t < Math.min(b, d1); t++) arr[t - d0] = v; }
+    (items || []).forEach(function (it) {
+      if (it.type !== "meeting") return;
+      mark(busy, it.start, it.end, true);
+      if (L.isDemo(it)) mark(rga, it.start, it.end, true);
+    });
+    (calBlocks || []).forEach(function (b) {
+      if (b.kind === "other") return;
+      for (var t = Math.max(b.start, d0); t < Math.min(b.end, d1); t++) if (!busy[t - d0]) rga[t - d0] = true;
+    });
+    var m = 0; for (var i = 0; i < n; i++) if (rga[i]) m++;
+    return { rga: m, total: n, share: m / n };
   };
 
   // Group slots into calendar blocks. Same type in a row = one block, even when the
@@ -1223,14 +1261,21 @@
 
   // ---------- RGA summary (with the definition) ----------
   function renderRGA(plan) {
-    var r = L.rgaSummary(plan), box = $("rga"); box.innerHTML = "";
-    var pctR = Math.round(r.share * 100);
-    box.appendChild(el("div", { class: "rga-row" }, [
-      el("span", { class: "rga-num", text: pctR + "%" }),
-      el("div", { class: "rga-text" }, [el("strong", { text: "RGA time: " + L.dur(r.rga) }), el("span", { text: " of " + L.dur(r.rga + r.non) + " planned" })])
-    ]));
-    box.appendChild(el("div", { class: "rga-meter", role: "img", "aria-label": pctR + "% of the day is revenue-generating" }, [el("div", { class: "rga-fill", style: "width:" + pctR + "%" })]));
+    var opt = L.rgaSummary(plan);
+    var now = L.currentRGA((state.cal.blocks || {})[state.date] || [], allItems());
+    var pNow = Math.round(now.share * 100), pOpt = Math.round(opt.share * 100);
+    var box = $("rga"); box.innerHTML = "";
+    function line(label, pctV, mins, cls) {
+      return el("div", { class: "rga-line " + cls }, [
+        el("div", { class: "rga-top" }, [el("span", { text: label }), el("strong", { text: pctV + "%" }), el("span", { class: "rga-mins", text: L.dur(mins) })]),
+        el("div", { class: "rga-meter", role: "img", "aria-label": label + ": " + pctV + "% of the day" }, [el("div", { class: "rga-fill", style: "width:" + pctV + "%" })])
+      ]);
+    }
+    box.appendChild(el("p", { class: "eyebrow", text: "RGA time" }));
+    box.appendChild(line("On your calendar now", pNow, now.rga, "now"));
+    box.appendChild(line("If you add the suggested blocks", pOpt, opt.rga, "opt"));
     box.appendChild(el("p", { class: "rga-def", text: "RGA (revenue-generating activity) is time with prospects: calling, rebooks, demos and follow-ups. Everything else (prep, practice, internal meetings, admin, lunch and breaks) is non-RGA." }));
+    return { now: now, opt: opt };
   }
 
   // ---------- Capacity, goal and recommendations ----------
@@ -1428,7 +1473,7 @@
     var cur = planFor();
     var tc = renderGoal(cur);
     $("plan-title").textContent = dayName(state.date) === "Today" ? "Today's plan" : WEEKDAY[L.weekdayOf(state.date)] + "'s plan";
-    renderRGA(cur.plan);
+    cur.rga = renderRGA(cur.plan);
     renderNotes(cur);
     renderCalendar(cur.plan);
     $("share-note").hidden = !C.dashboardEndpoint;
@@ -1439,14 +1484,15 @@
   var reportTimer = null;
   function queueReport(cur, tc) {
     if (!C.dashboardEndpoint || !token || !tc) return;
-    var items = allItems(), rga = L.rgaSummary(cur.plan), dd = dayData();
+    var items = allItems(), dd = dayData();
+    var rgaNow = cur.rga ? cur.rga.now : L.currentRGA((state.cal.blocks || {})[state.date] || [], items), rgaOpt = L.rgaSummary(cur.plan);
     var day = {
       date: state.date,
       mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: tc.cbs,
       coldPlanned: tc.coldPlanned, goalCold: C.goalColdDials, goalCallbacks: C.goalCallbacks, onTrack: tc.onTrack,
       bookedMinutes: tc.bookedMin, mobileMinutes: Math.round(tc.cap.mobile), restaurantMinutes: Math.round(tc.cap.restaurant), flexMinutes: Math.round(tc.cap.flex),
       utilization: tc.util, expectedMeetings: Math.round(tc.chk.expected * 100) / 100,
-      rgaMinutes: rga.rga, nonRgaMinutes: rga.non,
+      rgaMinutes: rgaNow.rga, nonRgaMinutes: rgaNow.total - rgaNow.rga, rgaPlanMinutes: rgaOpt.rga,
       demos: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Demo"; }).length,
       followUps: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Follow-up"; }).length,
       internalMeetings: items.filter(function (it) { return it.type === "meeting" && !L.isDemo(it); }).length,

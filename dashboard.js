@@ -87,7 +87,7 @@
     // day table
     $("d-day-title").textContent = selected === data.today ? "Today" : fmtDate(selected);
     var t = $("d-day"); t.innerHTML = "";
-    var head = ["Rep", "Status", "Cold set up", "Callbacks", "Calling time booked", "Using", "RGA", "Expected meetings", "Demos / F-ups", "Tasks (mobile / rest.)", "Issue", "Updated"];
+    var head = ["Rep", "Status", "Cold set up", "Callbacks", "Calling time booked", "Using", "RGA now (with plan)", "Expected meetings", "Demos / F-ups", "Tasks (mobile / rest.)", "Issue", "Updated"];
     t.appendChild(el("thead", null, [el("tr", null, head.map(function (h, i) { return el("th", { class: i > 1 && i < 10 ? "num" : null, text: h }); }))]));
     var tb = el("tbody");
     day.forEach(function (r) {
@@ -102,7 +102,7 @@
         el("td", { class: "num" + (cb < num(r.goalCallbacks || C.goalCallbacks) ? " bad" : ""), text: cb + " / " + (r.goalCallbacks || C.goalCallbacks) }),
         el("td", { class: "num", text: dur(r.bookedMinutes) }),
         el("td", { class: "num", text: num(r.utilization) + "%" }),
-        el("td", { class: "num", text: Math.round(rga * 100) + "%" }),
+        el("td", { class: "num", text: Math.round(rga * 100) + "%" + (r.rgaPlanMinutes ? " (" + Math.round(num(r.rgaPlanMinutes) / Math.max(1, num(r.rgaMinutes) + num(r.nonRgaMinutes)) * 100) + "%)" : "") }),
         el("td", { class: "num", text: num(r.expectedMeetings).toFixed(1) }),
         el("td", { class: "num", text: num(r.demos) + " / " + num(r.followUps) }),
         el("td", { class: "num", text: num(r.mobileTasks) + " / " + num(r.restaurantTasks) }),
@@ -121,7 +121,7 @@
     var by = {};
     rows.forEach(function (r) { (by[r.email] = by[r.email] || []).push(r); });
     var w = $("d-week"); w.innerHTML = "";
-    var wh = ["Rep", "Days used", "Days on track", "Avg cold set up", "Avg callbacks", "Avg calling time", "Avg RGA", "Avg expected meetings"];
+    var wh = ["Rep", "Days used", "Days on track", "Avg cold set up", "Avg callbacks", "Avg calling time", "Avg RGA now", "Avg expected meetings"];
     w.appendChild(el("thead", null, [el("tr", null, wh.map(function (h, i) { return el("th", { class: i ? "num" : null, text: h }); }))]));
     var wb = el("tbody");
     Object.keys(by).map(function (e) {

@@ -26,7 +26,7 @@ const DAILY = 'Daily';
 const COLS = ['key', 'date', 'email', 'updated', 'mobileTasks', 'restaurantTasks', 'callbacks', 'coldPlanned',
   'goalCold', 'goalCallbacks', 'onTrack', 'bookedMinutes', 'mobileMinutes', 'restaurantMinutes', 'flexMinutes',
   'utilization', 'expectedMeetings', 'rgaMinutes', 'nonRgaMinutes', 'demos', 'followUps', 'internalMeetings',
-  'ignored', 'shortTasks', 'idleMinutes'];
+  'ignored', 'shortTasks', 'idleMinutes', 'rgaPlanMinutes'];
 
 function setup() {
   const ss = SpreadsheetApp.getActive();
