@@ -58,39 +58,73 @@
     </section>
   </div>
 
-  <!-- ===================== TAB 2 ===================== -->
-  <div class="tab-panel" id="panel-day" role="region" aria-labelledby="tab-day" hidden>
-    <p class="tab-intro">The daily goal is <strong>120 and 10</strong>: 120 cold dials and 10 callbacks. Enter today's call tasks to see whether your calendar gets you there, and when to call which numbers.</p>
+  <!-- ===================== TAB 2: MY DAY ===================== -->
+  <div class="tab-panel" id="panel-day" role="region" aria-label="My day" hidden>
 
-    <div class="panel" id="cal-panel">
-      <h3>Google Calendar</h3>
+    <section class="connect-card" id="connect-card">
+      <h1>Plan your calling day</h1>
+      <p>Your plan is built from your Google Calendar: meetings, demos, callbacks and calling blocks. It's read-only. The site can see your events, never change them.</p>
       <div id="cal-box" aria-live="polite"></div>
-    </div>
+    </section>
 
-    <div class="day-toggle" id="day-toggle" role="group" aria-label="Pick a day"></div>
-
-    <div class="panel tasks" id="tasks">
-      <h3>Today's call tasks</h3>
-      <p class="hint">Enter how many call tasks you have in Salesloft today. Callbacks are counted from your calendar.</p>
-      <div class="task-inputs">
-        <div><label for="mobile-tasks">Mobile call tasks</label><input type="number" id="mobile-tasks" min="0" max="1000" step="1"></div>
-        <div><label for="restaurant-tasks">Restaurant call tasks</label><input type="number" id="restaurant-tasks" min="0" max="1000" step="1"></div>
-        <div id="callback-field"></div>
+    <div id="planner" hidden>
+      <div class="planner-bar">
+        <div class="day-switch" id="day-switch" role="group" aria-label="Pick a day"></div>
+        <div class="cal-mini" id="cal-mini" aria-live="polite"></div>
       </div>
-      <div id="task-check" aria-live="polite"></div>
-      <button class="btn" id="clear-day" type="button" style="margin-top:14px">Clear this day</button>
-    </div>
 
-    <div id="day-main">
-      <div class="changes" id="today" aria-live="polite"></div>
-      <p class="hint" id="cal-hint">Click any block to see what to do in it. Click a meeting or callback to change how it's treated. Callbacks don't block time: dial them from inside your calling blocks.</p>
-      <div class="rga-bar" id="rga-bar"></div>
-      <div class="legend" id="legend"></div>
-      <div class="calendar" id="calendar"></div>
+      <section class="card goal-card" aria-labelledby="goal-label">
+        <div class="goal-head">
+          <div>
+            <p class="eyebrow" id="goal-label">Today's goal</p>
+            <p class="goal-big" id="goal-big">120 + 10</p>
+            <p class="goal-sub">cold dials + callbacks</p>
+          </div>
+          <span class="status-pill" id="goal-pill"></span>
+        </div>
+
+        <div class="goal-body">
+          <div class="goal-inputs">
+            <div><label for="mobile-tasks">Mobile call tasks</label><input type="number" id="mobile-tasks" min="0" max="1000" step="1" inputmode="numeric" placeholder="0"></div>
+            <div><label for="restaurant-tasks">Restaurant call tasks</label><input type="number" id="restaurant-tasks" min="0" max="1000" step="1" inputmode="numeric" placeholder="0"></div>
+            <div><span class="label-like">Callbacks</span><div class="auto" id="cb-count">0</div><span class="hint">from your calendar</span></div>
+          </div>
+          <div class="meters" id="meters"></div>
+        </div>
+
+        <div class="next">
+          <p class="eyebrow">Next steps</p>
+          <ol class="next-steps" id="next-steps"></ol>
+          <p class="payoff" id="goal-payoff"></p>
+        </div>
+
+        <div class="goal-stats" id="goal-stats"></div>
+
+        <details class="details">
+          <summary>See the breakdown</summary>
+          <div id="goal-details"></div>
+        </details>
+      </section>
+
+      <section class="card plan-card" aria-labelledby="plan-title">
+        <div class="plan-head">
+          <h2 id="plan-title">Today's plan</h2>
+          <div class="rga" id="rga"></div>
+        </div>
+        <p class="hint">Click any block for what to do. Click a meeting or callback to change how it's treated.</p>
+        <p class="legend-line"><i class="t-cbpill" aria-hidden="true"></i> Callbacks: dial them during your blocks. They don't take up time.</p>
+        <ul class="plan-notes" id="plan-notes" hidden></ul>
+        <div class="calendar" id="calendar"></div>
+      </section>
+
+      <div class="planner-foot">
+        <p class="hint" id="share-note" hidden>Your daily numbers (call tasks, callbacks, calling time and meeting counts) are shared with your manager. Meeting titles and who you're meeting are not.</p>
+        <button class="link-btn" id="clear-day" type="button">Clear this day's call tasks</button>
+      </div>
     </div>
   </div>
 
-  <p class="footer-note">Numbers come from Seated's calls from Jul 31 to Oct 28, 2026. Your inputs on the My day tab are saved only in this browser.</p>
+  <p class="footer-note">Rates come from Seated's calls, Jul 31 to Oct 28, 2026. Your call task counts are saved in this browser.</p>
 </main>
 
 <script src="config.js"></script>

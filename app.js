@@ -398,6 +398,22 @@
     }
     return out;
   };
+  // Today (if it's a weekday) and the next business day, as YYYY-MM-DD in the rep's time zone.
+  // On a weekend: the next two business days.
+  L.planDays = function (now) {
+    var t = L.tzParts(now);
+    var base = new Date(Date.UTC(+t.ymd.slice(0, 4), +t.ymd.slice(5, 7) - 1, +t.ymd.slice(8, 10)));
+    var out = [], d = new Date(base);
+    if (t.weekday >= 1 && t.weekday <= 5) out.push(t.ymd);
+    while (out.length < 2) {
+      d.setUTCDate(d.getUTCDate() + 1);
+      var w = d.getUTCDay();
+      if (w >= 1 && w <= 5) out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  };
+  L.weekdayOf = function (ymd) { return new Date(ymd + "T12:00:00Z").getUTCDay(); };
+
   // A Google Calendar event -> a My day item, or { skip: reason }.
   L.eventToItem = function (ev) {
     if (!ev || ev.status === "cancelled") return { skip: "cancelled" };
@@ -1005,485 +1021,394 @@
   };
 
   // =====================================================================
-  // TAB 2
+  // TAB 2: MY DAY
   // =====================================================================
-  var STORE_KEY = "repPlaybook.v1";
-  var state = { day: null, days: {}, cal: { connected: false } };
+  var STORE_KEY = "repPlaybook.v2";
+  var state = { date: null, days: {}, cal: { connected: false } };
   var token = null, calMsg = null;
+  var WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
   function load() {
     try { var s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s && s.days) state = s; } catch (e) { /* storage blocked */ }
     if (!state.cal) state.cal = { connected: false };
-    if (!state.day) { var w = new Date().getDay(); state.day = (w >= 1 && w <= 5) ? w : 1; }
+    var days = L.planDays(new Date());
+    if (days.indexOf(state.date) < 0) state.date = days[0];
+    // forget task counts for days that have passed
+    Object.keys(state.days).forEach(function (k) { if (k < days[0]) delete state.days[k]; });
   }
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked */ } }
-  function dayData(d) {
-    d = d || state.day;
-    if (!state.days[d]) state.days[d] = { items: [], callbacksDue: 0, mobileTasks: 0, restaurantTasks: 0 };
-    var x = state.days[d];
-    if (x.mobileTasks == null) x.mobileTasks = 0;
-    if (x.restaurantTasks == null) x.restaurantTasks = 0;
-    return state.days[d];
+  function dayData(ymd) {
+    ymd = ymd || state.date;
+    if (!state.days[ymd]) state.days[ymd] = { mobileTasks: 0, restaurantTasks: 0 };
+    return state.days[ymd];
   }
-  var DAYS = ["", "Mon", "Tue", "Wed", "Thu", "Fri"];
   function calFresh() {
-    if (!state.cal.connected || !state.cal.week) return false;
-    return state.cal.week[1] === L.planWeek(new Date())[1];
+    return !!(state.cal.connected && state.cal.range && state.cal.range[0] === L.planDays(new Date())[0]);
   }
-  function calItems(d) {
-    d = d || state.day;
+  function calItems(ymd) {
     if (!calFresh()) return [];
     var hidden = state.cal.hidden || [];
-    return ((state.cal.items || {})[d] || []).map(function (it) { it.ignored = hidden.indexOf(it.id) >= 0; return it; });
+    return ((state.cal.items || {})[ymd || state.date] || []).map(function (it) { it.ignored = hidden.indexOf(it.id) >= 0; return it; });
   }
-  // Every meeting on the day, including ones the rep chose to ignore.
-  function listItems(d) { return calItems(d || state.day); }
-  // Only the meetings that block time.
-  function allItems(d) { return listItems(d).filter(function (it) { return !it.ignored; }); }
-  // The real date of a weekday (1-5) in the week being planned.
-  function dayYmd(d) { return calFresh() ? state.cal.week[d] : L.planWeek(new Date())[d]; }
-  function blockOnCal(d, b) {
-    if (!calFresh()) return false;
-    return ((state.cal.blocks || {})[d] || []).some(function (x) { return x.start <= b.start && x.end >= b.end; });
+  function listItems(ymd) { return calItems(ymd); }                                        // every event, ignored ones included
+  function allItems(ymd) { return listItems(ymd).filter(function (it) { return !it.ignored; }); }  // events that count
+  function blockOnCal(b) {
+    return ((state.cal.blocks || {})[state.date] || []).some(function (x) { return x.start <= b.start && x.end >= b.end; });
   }
   function addLink(text, href, label) {
     return el("a", { class: "cal-add", href: href, target: "_blank", rel: "noopener", "aria-label": label, text: text });
   }
   function blockLinkEl(b) {
     var bt = C.blockTypes[b.type];
-    if (blockOnCal(state.day, b)) return el("span", { class: "cal-add on", text: "\u2713 On calendar" });
-    var who = L.whoLine(b);
+    if (blockOnCal(b)) return el("span", { class: "cal-add on", text: "\u2713 On calendar" });
     return addLink("+ Calendar", L.gcalLink({
-      ymd: dayYmd(state.day), start: b.start, end: b.end, free: true,
+      ymd: state.date, start: b.start, end: b.end, free: true,
       title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
-      details: [who, bt.why, "", C.calendarBlockTag].join("\n")
+      details: [L.whoLine(b), bt.why, "", C.calendarBlockTag].join("\n")
     }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
   }
   function setIgnored(it, on) {
-    if (it.source === "calendar") {
-      var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
-      if (on) h.push(it.id);
-      state.cal.hidden = h;
-    }
+    var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
+    if (on) h.push(it.id);
+    state.cal.hidden = h;
     it.ignored = !!on;
   }
-  // ymd (optional): the real date being planned. Calendar events only apply to dates in the loaded week.
-  function planFor(d, ymd) {
-    var dd = dayData(d);
-    var useCal = !ymd || state.cal.week[d] === ymd;
-    var plan = L.buildDay({ day: d, items: useCal ? allItems(d) : [] });
-    var tasks = dd.mobileTasks + dd.restaurantTasks;
-    return { plan: plan, est: L.estimate(plan, 0, tasks), target: tasks };
+  function planFor(ymd) {
+    ymd = ymd || state.date;
+    var plan = L.buildDay({ day: L.weekdayOf(ymd), items: allItems(ymd) });
+    var dd = dayData(ymd);
+    return { plan: plan, est: L.estimate(plan, 0, dd.mobileTasks + dd.restaurantTasks) };
+  }
+  function dayName(ymd) {
+    return ymd === L.tzParts(new Date()).ymd ? "Today" : WEEKDAY[L.weekdayOf(ymd)];
+  }
+  function shortDate(ymd) {
+    var d = new Date(ymd + "T12:00:00");
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
-  function renderDayToggle() {
-    var box = $("day-toggle"); box.innerHTML = "";
-    for (var d = 1; d <= 5; d++) (function (d) {
-      var n = allItems(d).length;
-      var label = DAYS[d];
-      if (calFresh()) { var dt = state.cal.week[d]; label += " " + Number(dt.slice(5, 7)) + "/" + Number(dt.slice(8, 10)); }
-      var b = el("button", { type: "button", "aria-pressed": String(state.day === d), onclick: function () { state.day = d; save(); renderDay(); } }, [label]);
-      if (n) b.appendChild(el("span", { class: "badge", text: n + (n === 1 ? " meeting" : " meetings") }));
-      box.appendChild(b);
-    })(d);
+  // ---------- Day switch: today and the next business day ----------
+  function renderDaySwitch() {
+    var box = $("day-switch"); box.innerHTML = "";
+    L.planDays(new Date()).forEach(function (ymd) {
+      box.appendChild(el("button", { type: "button", "aria-pressed": String(state.date === ymd), onclick: function () { state.date = ymd; save(); renderDay(); } },
+        [el("strong", { text: dayName(ymd) }), el("span", { text: WEEKDAY[L.weekdayOf(ymd)].slice(0, 3) + ", " + shortDate(ymd) })]));
+    });
   }
 
-  // How the site treats a calendar event: "meeting", "callback" or "ignore".
+  // ---------- Treating calendar events ----------
   function setTreatment(it, how) {
     if (it.origEnd == null) it.origEnd = it.end;
-    if (how === "ignore") { setIgnored(it, true); }
-    else {
-      setIgnored(it, false);
-      it.type = how;
-      it.end = how === "callback" ? it.start + 15 : it.origEnd;
-    }
+    if (how === "ignore") setIgnored(it, true);
+    else { setIgnored(it, false); it.type = how; it.end = how === "callback" ? it.start + 15 : it.origEnd; }
     save(); renderDay();
   }
-  // Clicking a block shows what to do in it, with tips.
-  function makeInfo(node, info) {
+  var openMenu = null;
+  function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
+  function popover(anchor, cls, label) {
+    closeMenu();
+    var menu = el("div", { class: "cal-menu " + (cls || ""), role: "dialog", "aria-label": label });
+    menu.style.top = (anchor.offsetTop + Math.min(anchor.offsetHeight, 44)) + "px";
+    $("calendar").appendChild(menu);
+    openMenu = menu;
+    return menu;
+  }
+  function makeClickable(node, label, fn) {
     node.classList.add("clickable");
     node.setAttribute("tabindex", "0");
     node.setAttribute("role", "button");
-    node.setAttribute("aria-label", info.title + ", " + info.when + ". Show what to do");
-    node.addEventListener("click", function (e) { if (e.target.closest("a")) return; e.stopPropagation(); showInfo(node, info); });
-    node.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showInfo(node, info); } });
+    node.setAttribute("aria-label", label);
+    node.addEventListener("click", function (e) { if (e.target.closest("a")) return; e.stopPropagation(); fn(); });
+    node.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } });
   }
   function showInfo(anchor, info) {
-    closeMenu();
-    var menu = el("div", { class: "cal-menu cal-info", role: "dialog", "aria-label": info.title });
+    var menu = popover(anchor, "cal-info", info.title);
     menu.appendChild(el("p", { class: "cal-menu-title", text: info.title }));
-    menu.appendChild(el("p", { class: "hint", style: "margin:0 6px 6px", text: info.when + " ET" }));
-    if (info.who) menu.appendChild(el("p", { style: "margin:0 6px 8px;font-size:0.88rem", text: info.who }));
+    menu.appendChild(el("p", { class: "cal-menu-sub", text: info.when + " ET" + (info.rga != null ? (info.rga ? " \u00b7 RGA" : " \u00b7 Non-RGA") : "") }));
+    if (info.who) menu.appendChild(el("p", { class: "cal-menu-who", text: info.who }));
     var g = info.guide || {};
-    if (g.doThis && g.doThis.length) {
-      menu.appendChild(el("p", { class: "info-h", text: "What to do" }));
-      var ul = el("ul", { class: "info-list" }); g.doThis.forEach(function (t) { ul.appendChild(el("li", { text: t })); }); menu.appendChild(ul);
-    }
-    if (g.tips && g.tips.length) {
-      menu.appendChild(el("p", { class: "info-h", text: "Tips" }));
-      var ul2 = el("ul", { class: "info-list" }); g.tips.forEach(function (t) { ul2.appendChild(el("li", { text: t })); }); menu.appendChild(ul2);
-    }
+    [["What to do", g.doThis], ["Tips", g.tips]].forEach(function (sec) {
+      if (!sec[1] || !sec[1].length) return;
+      menu.appendChild(el("p", { class: "info-h", text: sec[0] }));
+      var ul = el("ul", { class: "info-list" }); sec[1].forEach(function (t) { ul.appendChild(el("li", { text: t })); }); menu.appendChild(ul);
+    });
     var foot = el("div", { class: "info-foot" });
     if (info.link) foot.appendChild(info.link);
     foot.appendChild(el("button", { type: "button", class: "btn", text: "Close", onclick: function () { closeMenu(); anchor.focus(); } }));
     menu.appendChild(foot);
-    menu.style.top = (anchor.offsetTop + Math.min(anchor.offsetHeight, 44)) + "px";
-    $("calendar").appendChild(menu);
-    openMenu = menu;
     menu.querySelector("button").focus();
   }
-  var openMenu = null;
-  function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
-  function showMenu(anchor, it) {
-    closeMenu();
-    var cal = $("calendar");
+  function showMenu(anchor, it, note) {
+    var menu = popover(anchor, "", "How to treat " + it.label);
     var cur = it.ignored ? "ignore" : it.type;
-    var menu = el("div", { class: "cal-menu", role: "menu", "aria-label": "How to treat " + it.label });
     menu.appendChild(el("p", { class: "cal-menu-title", text: it.label }));
-    [["meeting", "Meeting", "Blocks this time"], ["callback", "Callback", "Dial it during a calling block; doesn't block time"], ["ignore", "Ignore", "Call during it"]].forEach(function (o) {
-      menu.appendChild(el("button", { type: "button", role: "menuitemradio", "aria-checked": String(cur === o[0]), class: cur === o[0] ? "on" : null,
+    if (note) menu.appendChild(el("p", { class: "cal-menu-note" }, [note, it.link ? " " : null, it.link ? addLink("Open meeting", it.link, "Open " + it.label + " in Google Calendar") : null]));
+    [["meeting", "Meeting", "Blocks this time"], ["callback", "Callback", "Dial it during a calling block. Doesn't block time"], ["ignore", "Ignore", "Call during it"]].forEach(function (o) {
+      menu.appendChild(el("button", { type: "button", role: "menuitemradio", "aria-checked": String(cur === o[0]), class: "opt" + (cur === o[0] ? " on" : ""),
         onclick: function () { closeMenu(); setTreatment(it, o[0]); } }, [el("strong", { text: o[1] }), el("span", { text: o[2] })]));
     });
-    menu.style.top = (anchor.offsetTop + Math.min(anchor.offsetHeight, 44)) + "px";
-    cal.appendChild(menu);
-    openMenu = menu;
-    menu.querySelector("button.on, button").focus();
+    menu.querySelector("button.on, button.opt").focus();
   }
-  document.addEventListener("click", function (e) { if (openMenu && !openMenu.contains(e.target) && !e.target.closest(".cal-block.clickable, .ign-undo, .cb-pill")) closeMenu(); });
+  document.addEventListener("click", function (e) { if (openMenu && !openMenu.contains(e.target) && !e.target.closest(".clickable, .ign-undo, .cb-pill")) closeMenu(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
 
-  var LOCK = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5" width="8" height="6" rx="1" fill="currentColor"/><path d="M4 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
-
+  // ---------- The calendar ----------
+  function isRgaBlock(b) {
+    return b.type === "fixed" ? (b.fixed.kind === "meeting" && !!b.fixed.item && L.isDemo(b.fixed.item)) : !!(C.blockTypes[b.type] && C.blockTypes[b.type].rga);
+  }
   function renderCalendar(plan) {
     var cal = $("calendar"); cal.innerHTML = "";
     var slotPx = 30, start = L.toMin(C.dayStart), end = L.toMin(C.dayEnd);
     var px = function (min) { return (min - start) / C.slotMinutes * slotPx; };
+    var p0 = L.toMin(C.protectedWindow[0]), p1 = L.toMin(C.protectedWindow[1]);
     cal.style.height = px(end) + "px";
     var hours = el("div", { class: "cal-hours", "aria-hidden": "true" });
     for (var t = start; t <= end; t += 60) hours.appendChild(el("div", { style: "top:" + px(t) + "px", text: L.fmt(t).replace(":00", "") }));
     cal.appendChild(hours);
-    var list = el("ol", { style: "list-style:none;margin:0;padding:0", "aria-label": "Your day, " + C.repTimezoneLabel });
+    var list = el("ol", { class: "cal-list", "aria-label": "Your plan, " + C.repTimezoneLabel });
     L.blocks(plan).forEach(function (b) {
-      var h = px(b.end) - px(b.start);
-      var cls = "cal-block t-" + (b.type === "fixed" ? "fixed" : b.type);
-      var li = el("li", { class: cls, style: "top:" + (px(b.start) + 1) + "px;height:" + (h - 2) + "px" });
-      var title, why = "", who = "";
+      var h = px(b.end) - px(b.start), rga = isRgaBlock(b);
+      var li = el("li", { class: "cal-block t-" + (b.type === "fixed" ? (b.fixed.kind === "meeting" ? (rga ? "demo" : "fixed") : "admin") : b.type),
+        style: "top:" + (px(b.start) + 1) + "px;height:" + (h - 2) + "px" });
       if (b.type === "fixed") {
-        var f = b.fixed;
-        var dk = f.kind === "meeting" ? L.demoKind(f.item || f.label) : null;
-        title = f.kind === "callback" ? "Callback: " + String(f.label).replace(/^\s*REMINDER\s*-\s*/i, "") : (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
-        li.appendChild(el("div", { class: "b-title", html: LOCK + "<span></span>" }));
-        li.lastChild.lastChild.textContent = title;
-        if ((f.kind === "prep" || f.kind === "post") && C.meetingGuides[f.kind]) makeInfo(li, { title: f.label, when: L.fmtRange(f.start, f.end), who: "", why: "", guide: C.meetingGuides[f.kind], link: null });
-        if (f.item && f.kind !== "prep" && f.kind !== "post") (function (item, node) {
-          node.classList.add("clickable");
-          node.setAttribute("tabindex", "0");
-          node.setAttribute("role", "button");
-          node.setAttribute("aria-label", title + ". Change how it's treated");
-          node.addEventListener("click", function (e) { e.stopPropagation(); showMenu(node, item); });
-          node.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showMenu(node, item); } });
-        })(f.item, li);
-        var ft = f.kind === "callback" ? L.fmt(f.start) : L.fmtRange(f.start, f.end);
-        li.lastChild.appendChild(el("span", { class: "b-time", text: ft }));
+        var f = b.fixed, title;
+        if (f.kind === "meeting") {
+          var dk = L.demoKind(f.item || f.label);
+          title = (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
+        } else title = f.label;
+        var conflict = f.kind === "meeting" && !rga && f.start < p1 && f.end > p0;
+        li.appendChild(el("div", { class: "b-title" }, [conflict ? el("span", { class: "chip warn", text: "Prime time" }) : null, el("span", { text: title }), el("span", { class: "b-time", text: L.fmtRange(f.start, f.end) })]));
+        if (f.kind === "prep" || f.kind === "post") {
+          makeClickable(li, title + ". Show what to do", function () { showInfo(li, { title: title, when: L.fmtRange(f.start, f.end), guide: C.meetingGuides[f.kind], rga: false }); });
+        } else if (f.item) {
+          var note = conflict ? "This sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM." : null;
+          makeClickable(li, title + ". Change how it's treated", function () { showMenu(li, f.item, note); });
+        }
       } else {
-        var bt = C.blockTypes[b.type];
-        title = bt.label + (b.moved ? " (moved)" : "");
-        why = bt.why; who = L.whoLine(b);
-        var addEl = (bt.dials || b.type === "practice" || b.type === "leads") ? blockLinkEl(b) : null;
-        li.appendChild(el("div", { class: "b-title" }, [addEl, title, el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
-        if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who }));
-        if (h >= 88) li.appendChild(el("div", { class: "b-why", text: why }));
-        makeInfo(li, { title: title, when: L.fmtRange(b.start, b.end), who: who, why: why, guide: bt, link: addEl ? blockLinkEl(b) : null });
+        var bt = C.blockTypes[b.type], who = L.whoLine(b), link = (bt.dials || b.type === "practice" || b.type === "leads") ? blockLinkEl(b) : null;
+        var t2 = bt.label + (b.moved ? " (moved)" : "");
+        li.appendChild(el("div", { class: "b-title" }, [link, el("span", { text: t2 }), el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
+        if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who.replace(/^Calling /, "") }));
+        makeClickable(li, t2 + ", " + L.fmtRange(b.start, b.end) + ". Show what to do", function () {
+          showInfo(li, { title: t2, when: L.fmtRange(b.start, b.end), who: who, guide: bt, rga: rga, link: link ? blockLinkEl(b) : null });
+        });
       }
       list.appendChild(li);
-      // RGA tag in the column on the right
-      var rga = b.type === "fixed" ? (b.fixed.kind === "meeting" && b.fixed.item && L.isDemo(b.fixed.item)) : !!(C.blockTypes[b.type] && C.blockTypes[b.type].rga);
       cal.appendChild(el("div", { class: "rga-tag " + (rga ? "is-rga" : "non-rga"), style: "top:" + (px(b.start) + 1) + "px;height:" + (h - 2) + "px", "aria-hidden": "true" }, [h >= 20 ? (rga ? "RGA" : "Non-RGA") : ""]));
     });
     cal.appendChild(list);
-    // Callbacks: pills in a lane on the right. They don't block calling time.
+    // Callbacks: pills beside the calendar. They don't block time.
     var cbs = (plan.callbacks || []).filter(function (it) { return it.start >= start && it.start < end; });
     cal.classList.toggle("has-lane", cbs.length > 0);
-    var laneUsed = {};
+    var used = {};
     cbs.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (it) {
-      var top = px(it.start);
-      var key = Math.floor(top / (slotPx * 0.8));
-      while (laneUsed[key]) key++;            // nudge down if two callbacks share a time
-      laneUsed[key] = true;
-      var y = Math.max(top, key * slotPx * 0.8);
-      var name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
+      var top = px(it.start), key = Math.floor(top / (slotPx * 0.8));
+      while (used[key]) key++;
+      used[key] = true;
+      var y = Math.max(top, key * slotPx * 0.8), name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
       var pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.fmt(it.start) + " " + it.label,
         "aria-label": "Callback at " + L.fmt(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.fmt(it.start) }), " " + name]);
       pill.addEventListener("click", function (e) { e.stopPropagation(); showMenu(pill, it); });
       cal.appendChild(pill);
     });
-    // Ignored meetings: a dashed outline over the calling time, with an Undo button.
+    // Ignored meetings: dashed outline with a tag to change it back.
     listItems().filter(function (it) { return it.ignored && it.end > start && it.start < end; }).forEach(function (it) {
       var a = Math.max(it.start, start), z = Math.min(it.type === "callback" ? it.start + 15 : it.end, end);
       var box = el("div", { class: "cal-ignored", style: "top:" + (px(a) + 1) + "px;height:" + Math.max(px(z) - px(a) - 2, 18) + "px" });
-      box.appendChild(el("button", { type: "button", class: "ign-undo", "aria-label": "Stop ignoring " + it.label,
+      box.appendChild(el("button", { type: "button", class: "ign-undo", "aria-label": "Ignored: " + it.label + ". Change how it's treated",
         onclick: function (e) { e.stopPropagation(); showMenu(box, it); } }, ["Ignored: " + it.label]));
       cal.appendChild(box);
     });
   }
 
+  // ---------- RGA summary (with the definition) ----------
   function renderRGA(plan) {
-    var r = L.rgaSummary(plan), box = $("rga-bar"); box.innerHTML = "";
+    var r = L.rgaSummary(plan), box = $("rga"); box.innerHTML = "";
     var pctR = Math.round(r.share * 100);
-    box.appendChild(el("p", { html: "<strong>RGA time:</strong> " + L.dur(r.rga) + " (" + pctR + "%). <strong>Non-RGA:</strong> " + L.dur(r.non) + " (" + (100 - pctR) + "%)." }));
-    box.appendChild(el("div", { class: "rga-meter", role: "img", "aria-label": pctR + "% of the day is revenue generating" }, [el("div", { class: "rga-fill", style: "width:" + pctR + "%" })]));
-  }
-  function renderLegend() {
-    var lg = $("legend"); lg.innerHTML = "";
-    ["prep", "practice", "rebooks", "mobile", "restaurant", "prime", "sweep", "lunch", "break", "leads", "wrap"].forEach(function (t) {
-      lg.appendChild(el("span", null, [el("i", { class: "t-" + t }), C.blockTypes[t].label]));
-    });
-    lg.appendChild(el("span", null, [el("i", { class: "t-fixed" }), "Meetings (fixed)"]));
-    lg.appendChild(el("span", null, [el("i", { class: "rga-swatch is-rga" }), "RGA: talking to prospects"]));
-    lg.appendChild(el("span", null, [el("i", { class: "rga-swatch non-rga" }), "Non-RGA"]));
-    lg.appendChild(el("span", null, [el("i", { class: "t-cbpill" }), "Callbacks (dial them during your blocks)"]));
+    box.appendChild(el("div", { class: "rga-row" }, [
+      el("span", { class: "rga-num", text: pctR + "%" }),
+      el("div", { class: "rga-text" }, [el("strong", { text: "RGA time: " + L.dur(r.rga) }), el("span", { text: " of " + L.dur(r.rga + r.non) + " planned" })])
+    ]));
+    box.appendChild(el("div", { class: "rga-meter", role: "img", "aria-label": pctR + "% of the day is revenue-generating" }, [el("div", { class: "rga-fill", style: "width:" + pctR + "%" })]));
+    box.appendChild(el("p", { class: "rga-def", text: "RGA (revenue-generating activity) is time with prospects: calling, rebooks, demos and follow-ups. Everything else (prep, practice, internal meetings, admin, lunch and breaks) is non-RGA." }));
   }
 
-  function describeChanges(plan, est) {
-    var msgs = [];
-    var blocksNow = L.blocks(plan);
-    blocksNow.filter(function (b) { return b.moved && b.type !== "fixed"; }).forEach(function (b) {
-      var w = L.whoLine(b), when = L.fmtRange(b.start, b.end), tail = w ? " " + w.charAt(0).toLowerCase() + w.slice(1) + "." : "";
-      if (b.type === "prime" || b.type === "restaurant") msgs.push("Restaurant-line time your meetings covered moved to " + when + "." + (w ? " You're " + w.charAt(0).toLowerCase() + w.slice(1) + "." : ""));
-      else msgs.push(C.blockTypes[b.type].label + " moved to " + when + "." + (w ? " You're " + w.charAt(0).toLowerCase() + w.slice(1) + "." : ""));
-    });
-    plan.notes.forEach(function (n) { msgs.push(n); });
-    return msgs;
-  }
-
+  // ---------- Capacity, goal and recommendations ----------
   function callbackCount() { return allItems().filter(function (it) { return it.type === "callback"; }).length; }
-  // Minutes of calling time by kind: from blocks on the calendar, or from the plan if not connected.
-  // Minutes of calling time by kind, from the calling blocks on the rep's calendar.
   function capacity(cur) {
-    var cap = { mobile: 0, restaurant: 0, flex: 0 };
     // Calling blocks are marked "free," so demos can be booked on top of them.
-    // Time taken by meetings (and demo prep and wrap-up) doesn't count as calling time.
-    var fixedSlots = cur ? cur.plan.slots.filter(function (s) { return s.fixed; }) : [];
-    ((state.cal.blocks || {})[state.day] || []).forEach(function (b) {
+    // Time taken by meetings, demo prep and wrap-up doesn't count as calling time.
+    var cap = { mobile: 0, restaurant: 0, flex: 0 };
+    var fixedSlots = cur.plan.slots.filter(function (s) { return s.fixed; });
+    ((state.cal.blocks || {})[state.date] || []).forEach(function (b) {
       var k = b.kind || "flex"; if (k === "other") return;
       var mins = Math.max(0, b.end - b.start);
       fixedSlots.forEach(function (s) { mins -= Math.max(0, Math.min(b.end, s.end) - Math.max(b.start, s.start)); });
       cap[k] += Math.max(0, mins);
     });
-    return { cap: cap, source: "calendar" };
+    return cap;
   }
   function fmtMeet(n) { return n < 0.1 && n > 0 ? n.toFixed(2) : n.toFixed(1); }
-  // "That's +0.4 meetings today. It takes about 35 minutes of dialing and adds about 9 meetings a month."
   function payoff(meetings, dials) {
-    var mins = Math.max(15, Math.ceil(dials / C.dialsPerHour * 60 / 15) * 15);   // same rounding as "Add about ..."
+    var mins = Math.max(15, Math.ceil(dials / C.dialsPerHour * 60 / 15) * 15);
     var month = Math.max(1, Math.round(meetings * C.callingDaysPerMonth));
-    return "That's +" + fmtMeet(meetings) + (fmtMeet(meetings) === "1.0" ? " meeting" : " meetings") + " today. It takes about " + L.dur(mins) +
-      " of dialing and adds about " + month + (month === 1 ? " meeting" : " meetings") + " a month.";
+    return "+" + fmtMeet(meetings) + (fmtMeet(meetings) === "1.0" ? " meeting" : " meetings") + " a day, about " + month + " a month, for " + L.dur(mins) + " of dialing.";
   }
-  function renderTaskCheck(cur) {
-    var dd = dayData(), box = $("task-check"); box.innerHTML = "";
-    var r = C.bookingRatePerDial, dph = C.dialsPerHour;
-    var cf = $("callback-field"); cf.innerHTML = "";
-    var cbs = callbackCount();
-    cf.appendChild(el("span", { style: "font-weight:600;font-size:0.93rem;display:block;margin:12px 0 4px", text: "Callback tasks" }));
-    cf.appendChild(el("div", { class: "auto", text: String(cbs) }));
-    cf.appendChild(el("p", { class: "hint", text: "From your calendar" }));
-
-    var c = capacity(cur);
-    var chk = L.taskCheck({ mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: cbs, cap: c.cap });
-    var bookedMin = c.cap.mobile + c.cap.restaurant + c.cap.flex;
-    var coldUsed = chk.dials - cbs;
-    var usedMin = Math.round(coldUsed / dph * 60);
-
-    // 1) The goal: "120 and 10" (120 cold dials and 10 callbacks)
-    var gC = C.goalColdDials, gB = C.goalCallbacks;
-    var coldTasks = dd.mobileTasks + dd.restaurantTasks;
-    var coldPlanned = chk.dials - cbs;
+  function meter(label, val, goal) {
+    var pctV = Math.min(100, Math.round(val / Math.max(1, goal) * 100));
+    return el("div", { class: "meter" + (val >= goal ? " done" : "") }, [
+      el("div", { class: "meter-top" }, [el("span", { text: label }), el("strong", { text: val + " of " + goal })]),
+      el("div", { class: "meter-track", role: "img", "aria-label": label + ": " + val + " of " + goal }, [el("div", { class: "meter-fill", style: "width:" + pctV + "%" })])
+    ]);
+  }
+  function renderGoal(cur) {
+    var dd = dayData(), r = C.bookingRatePerDial, dph = C.dialsPerHour, gC = C.goalColdDials, gB = C.goalCallbacks;
+    var cbs = callbackCount(), cap = capacity(cur);
+    var chk = L.taskCheck({ mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: cbs, cap: cap });
+    var bookedMin = cap.mobile + cap.restaurant + cap.flex;
+    var coldTasks = dd.mobileTasks + dd.restaurantTasks, coldPlanned = chk.dials - cbs;
     var capDials = Math.floor(bookedMin / 60 * dph);
     var onTrack = coldPlanned >= gC && cbs >= gB;
-    var head = el("div", { class: "verdict " + (onTrack ? "good" : "short") });
-    head.appendChild(el("div", { style: "font-size:1.1rem", text: "Today's goal: " + gC + " and " + gB + ". You're set up for " + coldPlanned + " cold " + (coldPlanned === 1 ? "dial" : "dials") + " and " + cbs + (cbs === 1 ? " callback." : " callbacks.") }));
-    var gaps = [];
-    if (coldTasks < gC) gaps.push("Pull " + (gC - coldTasks) + " more cold calls from your cadences.");
-    if (capDials < gC) gaps.push("Book about " + L.dur(Math.ceil((gC - capDials) / dph * 60 / 15) * 15) + " more calling time on your calendar" + (bookedMin ? "" : " (you have none yet)") + ".");
-    if (cbs < gB) gaps.push((gB - cbs) + (gB - cbs === 1 ? " callback" : " callbacks") + " short. Callbacks come from owner conversations: set a Nooks reminder for every \u201ccall me back.\u201d");
-    if (gaps.length) {
-      var ulg = el("ul", { class: "goal-gaps" });
-      gaps.forEach(function (g) { ulg.appendChild(el("li", { text: g })); });
-      head.appendChild(ulg);
-      var addCold = Math.max(0, gC - coldPlanned), addCb = Math.max(0, gB - cbs);
-      var gain = addCold * (r.mobileBlock + r.restaurantBlock) / 2 + addCb * r.callback;
-      if (gain > 0) head.appendChild(el("div", { style: "margin-top:6px;font-weight:400", text: "Hitting " + gC + " and " + gB + ": " + payoff(gain, addCold + addCb) }));
-    } else {
-      head.appendChild(el("div", { style: "margin-top:6px;font-weight:400", text: "You're set up to hit it. Work every callback within a day." }));
-    }
-    box.appendChild(head);
-
-    // 2) Calling time: available vs. used
+    var usedMin = Math.round(coldPlanned / dph * 60);
     var util = bookedMin ? Math.min(100, Math.round(usedMin / bookedMin * 100)) : 0;
-    box.appendChild(el("p", { class: "util", html: "<strong>Calling time on your calendar:</strong> " + (bookedMin ? L.dur(bookedMin) : "none") +
-      ". <strong>You'll use:</strong> " + (usedMin ? L.dur(Math.min(usedMin, bookedMin)) : "none") + (bookedMin ? " (" + util + "%)" : "") + "." }));
-
-    // 3) The table
-    function room(n) { return el("td", { class: "num", text: n > 0 ? "+" + n : "\u2014" }); }
-    function status(rw, minutes) {
-      if (rw.short > 0) return el("td", { class: "bad", text: minutes ? rw.short + " won't fit" : "No calling time booked" });
-      if (!rw.tasks) return el("td", { class: "bad", text: minutes ? "No tasks" : "No tasks or time" });
-      return el("td", { class: "ok", text: "Fits" });
-    }
-    function row(label, rw, minutes, spare) {
-      return el("tr", null, [el("td", { text: label }), el("td", { class: "num", text: String(rw.tasks) }), el("td", { class: "num", text: minutes ? L.dur(minutes) : "None" }),
-        el("td", { class: "num", text: String(rw.capacity) }), room(spare), status(rw, minutes)]);
-    }
-    var tb = el("tbody", null, [row("Mobile", chk.mobile, c.cap.mobile, chk.spare.mobile), row("Restaurant", chk.restaurant, c.cap.restaurant, chk.spare.restaurant)]);
-    if (c.cap.flex) tb.appendChild(el("tr", null, [el("td", { text: "Callback and general call blocks" }), el("td", { class: "num", text: "\u2014" }), el("td", { class: "num", text: L.dur(c.cap.flex) }), el("td", { class: "num", text: String(chk.flexCapacity) }), room(chk.spare.flex), el("td", { class: "hint", text: "Covers overflow from either" })]));
-    tb.appendChild(el("tr", null, [el("td", { text: "Callbacks" }), el("td", { class: "num", text: String(cbs) }), el("td", { class: "num", text: "At their own times" }), el("td", { class: "num", text: String(cbs) }), room(0), el("td", { class: cbs ? "ok" : "hint", text: cbs ? "Fits" : "None today" })]));
-    box.appendChild(el("div", { class: "table-scroll", style: "margin-top:10px" }, [el("table", { class: "check-table" }, [
-      el("thead", null, [el("tr", null, [el("th", { text: "Call tasks" }), el("th", { class: "num", text: "Tasks" }), el("th", { class: "num", text: "Calling time on your calendar" }), el("th", { class: "num", text: "Can dial" }), el("th", { class: "num", text: "Room for more" }), el("th", { text: "" })])]), tb])]));
-
-    // 4) What to do about it
     var shortTotal = Math.max(0, chk.mobile.short) + Math.max(0, chk.restaurant.short);
-    if (shortTotal > 0) {
-      var addMin = Math.ceil(shortTotal / dph * 60 / 15) * 15;
-      box.appendChild(el("div", { class: "verdict idle" }, [
-        el("div", { text: "You won't get through " + shortTotal + " of your tasks. Add about " + L.dur(addMin) + " of calling time to your calendar, then click Refresh." }),
-        el("div", { style: "margin-top:6px;font-weight:400", text: payoff(chk.shortMeetings, shortTotal) })]));
-      var want = [];
-      if (chk.mobile.short > 0) want.push("mobile");
-      if (chk.restaurant.short > 0) want.push("restaurant", "prime");
-      var cands = L.blocks(cur.plan).filter(function (b) { return want.indexOf(b.type) >= 0 && !blockOnCal(state.day, b); });
-      if (cands.length) {
-        box.appendChild(el("p", { style: "margin:8px 0 0", text: "From today's plan:" }));
-        var ul = el("ul", { class: "add-list" });
-        cands.forEach(function (b) { ul.appendChild(el("li", null, [C.blockTypes[b.type].label + " " + L.fmtRange(b.start, b.end), blockLinkEl(b)])); });
-        box.appendChild(ul);
-      }
-    } else if (chk.idleMinutes >= 15) {
-      var addAll = chk.spare.mobile + chk.spare.restaurant + chk.spare.flex, parts = [];
-      if (chk.spare.mobile) parts.push(chk.spare.mobile + " mobile");
-      if (chk.spare.restaurant) parts.push(chk.spare.restaurant + " restaurant");
-      if (chk.spare.flex) parts.push(chk.spare.flex + " of either");
-      box.appendChild(el("div", { class: "verdict idle" }, [
-        el("div", { text: "Recommendation: pull about " + addAll + " more calls from your cadences (" + parts.join(", ") + ") to fill the calling time you've booked." }),
-        el("div", { style: "margin-top:6px;font-weight:400", text: payoff(chk.spareMeetings, addAll) })]));
-    } else if (!bookedMin) {
-      box.appendChild(el("div", { class: "verdict idle", text: "You have no calling time on your calendar. Add blocks from the plan below with + Calendar, then click Refresh." }));
-    }
 
-    // 5) Summary numbers and how they're calculated
+    $("goal-label").textContent = (state.date === L.tzParts(new Date()).ymd ? "Today's" : WEEKDAY[L.weekdayOf(state.date)] + "'s") + " goal";
+    $("goal-big").textContent = gC + " + " + gB;
+    var pill = $("goal-pill"); pill.textContent = onTrack ? "On track" : "Not there yet"; pill.className = "status-pill " + (onTrack ? "good" : "bad");
+    $("cb-count").textContent = String(cbs);
+
+    var m = $("meters"); m.innerHTML = "";
+    m.appendChild(meter("Cold dials you're set up for", coldPlanned, gC));
+    m.appendChild(meter("Callbacks on your calendar", cbs, gB));
+
+    // Next steps: one line each, most important first
+    var steps = $("next-steps"); steps.innerHTML = "";
+    var add = function (text, extra) { steps.appendChild(el("li", null, [el("span", { text: text }), extra || null])); };
+    if (coldTasks < gC) add("Pull " + (gC - coldTasks) + " more cold calls from your cadences.");
+    if (capDials < gC || shortTotal > 0) {
+      var needMin = Math.ceil(Math.max(gC - capDials, shortTotal) / dph * 60 / 15) * 15;
+      var want = chk.mobile.short > 0 && chk.restaurant.short <= 0 ? ["mobile"] : chk.restaurant.short > 0 && chk.mobile.short <= 0 ? ["restaurant", "prime"] : ["mobile", "restaurant", "prime"];
+      var cands = L.blocks(cur.plan).filter(function (b) { return want.indexOf(b.type) >= 0 && !blockOnCal(b); });
+      var list = null;
+      if (cands.length) {
+        list = el("ul", { class: "add-list" });
+        cands.forEach(function (b) { list.appendChild(el("li", null, [C.blockTypes[b.type].label + ", " + L.fmtRange(b.start, b.end), blockLinkEl(b)])); });
+      }
+      add("Book about " + L.dur(needMin) + " more calling time" + (bookedMin ? "" : " (you have none yet)") + ". Add blocks, then click Refresh.", list);
+    }
+    if (cbs < gB) add((gB - cbs) + " more " + (gB - cbs === 1 ? "callback" : "callbacks") + " to reach " + gB + ". Set a Nooks reminder for every \u201ccall me back.\u201d");
+    if (!steps.children.length && chk.idleMinutes >= 15) {
+      var extra = chk.spare.mobile + chk.spare.restaurant + chk.spare.flex;
+      add("You have room for about " + extra + " more calls in the time you've booked. Pull them from your cadences: " + payoff(chk.spareMeetings, extra));
+    }
+    if (!steps.children.length) add("You're set up to hit it. Work every callback within a day.");
+    var gain = Math.max(0, gC - coldPlanned) * (r.mobileBlock + r.restaurantBlock) / 2 + Math.max(0, gB - cbs) * r.callback;
+    $("goal-payoff").textContent = gain > 0 ? "Hitting " + gC + " + " + gB + ": " + payoff(gain, Math.max(0, gC - coldPlanned) + Math.max(0, gB - cbs)) : "";
+
+    // Stats
     var focusMin = Math.round(chk.dials / dph * 60 / 5) * 5;
-    box.appendChild(el("div", { class: "task-summary" }, [
-      el("div", null, [el("div", { class: "big", text: chk.expected.toFixed(1) }), el("div", { class: "hint", text: "expected meetings" })]),
-      el("div", null, [el("div", { class: "big" + (coldPlanned >= gC ? "" : " bad-num"), text: coldPlanned + " + " + cbs }), el("div", { class: "hint", text: "cold dials + callbacks (goal " + gC + " + " + gB + ")" })]),
-      el("div", null, [el("div", { class: "big", text: L.dur(focusMin).replace(" hours", "h").replace(" hour", "h").replace(" minutes", "m") }), el("div", { class: "hint", text: "of focused dialing at " + dph + " an hour" })])
-    ]));
-    var how = el("details", { class: "collapsible" }, [el("summary", { text: "How expected meetings are calculated" })]);
-    how.appendChild(el("p", { class: "hint", text: "Each dial is multiplied by the share of dials that booked a demo last quarter (Jul 31 to Oct 28, 2026, cold prospecting calls): mobile " +
-      pct(r.mobileBlock, 1) + ", restaurant line " + pct(r.restaurantBlock, 1) + ", callback " + pct(r.callback, 1) + ". These already include pickups, reaching the owner and booking, so 100 mobile dials is about " +
-      (100 * r.mobileBlock).toFixed(1) + " meetings. Calling time is your calling blocks at " + dph + " dials an hour." }));
-    box.appendChild(how);
-    return { chk: chk, cbs: cbs, bookedMin: bookedMin, cap: c.cap, coldPlanned: coldPlanned, coldTasks: coldTasks, onTrack: onTrack, util: util, shortTotal: shortTotal };
+    var stats = $("goal-stats"); stats.innerHTML = "";
+    [[chk.expected.toFixed(1), "expected meetings"], [focusMin ? L.dur(focusMin).replace(/ hours?/, "h").replace(" minutes", "m") : "0m", "focused dialing at " + dph + "/hr"],
+     [bookedMin ? L.dur(bookedMin).replace(/ hours?/, "h").replace(" minutes", "m") : "None", "calling time booked" + (bookedMin ? ", " + util + "% used" : "")]].forEach(function (x) {
+      stats.appendChild(el("div", null, [el("div", { class: "stat-num", text: x[0] }), el("div", { class: "stat-label", text: x[1] })]));
+    });
+
+    // Details: the full breakdown
+    var det = $("goal-details"); det.innerHTML = "";
+    function row(label, rw, minutes, spare) {
+      var st = rw.short > 0 ? [minutes ? rw.short + " won't fit" : "No time booked", "bad"] : !rw.tasks ? ["No tasks", "bad"] : ["Fits", "ok"];
+      return el("tr", null, [el("td", { text: label }), el("td", { class: "num", text: String(rw.tasks) }), el("td", { class: "num", text: minutes ? L.dur(minutes) : "\u2014" }),
+        el("td", { class: "num", text: String(rw.capacity) }), el("td", { class: "num", text: spare > 0 ? "+" + spare : "\u2014" }), el("td", { class: st[1], text: st[0] })]);
+    }
+    var tb = el("tbody", null, [row("Mobile", chk.mobile, cap.mobile, chk.spare.mobile), row("Restaurant", chk.restaurant, cap.restaurant, chk.spare.restaurant)]);
+    if (cap.flex) tb.appendChild(el("tr", null, [el("td", { text: "Other call blocks" }), el("td", { class: "num", text: "\u2014" }), el("td", { class: "num", text: L.dur(cap.flex) }), el("td", { class: "num", text: String(chk.flexCapacity) }), el("td", { class: "num", text: chk.spare.flex > 0 ? "+" + chk.spare.flex : "\u2014" }), el("td", { class: "hint", text: "Covers either" })]));
+    det.appendChild(el("div", { class: "table-scroll" }, [el("table", { class: "check-table" }, [
+      el("thead", null, [el("tr", null, ["Call tasks", "Tasks", "Time booked", "Can dial", "Room for more", ""].map(function (h, i) { return el("th", { class: i && i < 5 ? "num" : null, text: h }); }))]), tb])]));
+    det.appendChild(el("p", { class: "hint", text: "Expected meetings use the share of dials that booked a demo last quarter: mobile " + pct(r.mobileBlock, 1) + ", restaurant line " + pct(r.restaurantBlock, 1) + ", callback " + pct(r.callback, 1) +
+      ". Calling time is the calling blocks on your calendar at " + dph + " dials an hour, minus any meetings inside them." }));
+
+    return { chk: chk, cbs: cbs, bookedMin: bookedMin, cap: cap, coldPlanned: coldPlanned, coldTasks: coldTasks, onTrack: onTrack, util: util, shortTotal: shortTotal };
   }
 
-  function renderToday(cur) {
-    var box = $("today"); box.innerHTML = "";
-    var tips = L.suggest({ plan: cur.plan, est: cur.est, items: allItems(), day: state.day });
-    var allDay = calFresh() ? ((state.cal.allDay || {})[state.day] || []) : [];
-    allDay.forEach(function (a) { tips.unshift({ text: (a.outOfOffice ? "You're marked out of office: " : "All-day event: ") + q(a.label) + ". If you're not calling today, ignore this plan." }); });
-    var ignored = listItems().filter(function (it) { return it.ignored; }).map(function (it) {
-      return "Ignoring " + q(it.label) + " (" + (it.type === "callback" ? L.fmt(it.start) : L.fmtRange(it.start, it.end)) + "). That time is calling time.";
-    });
-    var notes = ignored.concat(describeChanges(cur.plan, cur.est));
-    box.appendChild(el("h3", { text: "Today" }));
-    var ul = el("ul");
-    tips.forEach(function (t) {
-      var li = el("li", { class: "tip", text: t.text });
-      if (t.item && t.item.link) { li.appendChild(document.createTextNode(" ")); li.appendChild(addLink("Open meeting", t.item.link, "Open " + t.item.label + " in Google Calendar")); }
-      ul.appendChild(li);
-    });
-    notes.forEach(function (t) { ul.appendChild(el("li", { text: t })); });
-    box.appendChild(ul);
+  function renderNotes(cur) {
+    var notes = cur.plan.notes.slice();
+    var allDay = (state.cal.allDay || {})[state.date] || [];
+    allDay.forEach(function (a) { notes.unshift((a.outOfOffice ? "You're marked out of office: " : "All-day event: ") + q(a.label) + "."); });
+    var box = $("plan-notes"); box.innerHTML = "";
+    notes.forEach(function (n) { box.appendChild(el("li", { text: n })); });
+    box.hidden = !notes.length;
   }
 
   // ---------- Google Calendar ----------
-  function calStatus(text, isErr) { calMsg = text ? { text: text, err: !!isErr } : null; renderCalBox(); }
-  function renderCalBox() {
-    var box = $("cal-box"); if (!box) return; box.innerHTML = "";
-    if (!C.googleClientId) {
-      box.appendChild(el("p", { class: "hint", text: "Calendar connection isn't set up yet, so this tab can't plan your day. Your manager adds it once (see the README)." }));
+  function calStatus(text, isErr) { calMsg = text ? { text: text, err: !!isErr } : null; renderConnect(); }
+  function renderConnect() {
+    var connected = calFresh();
+    $("connect-card").hidden = connected;
+    $("planner").hidden = !connected;
+    var box = $("cal-box"); box.innerHTML = "";
+    var mini = $("cal-mini"); mini.innerHTML = "";
+    if (!C.googleClientId) { box.appendChild(el("p", { class: "hint", text: "Calendar connection isn't set up yet. Your manager adds it once (see the README)." })); return; }
+    if (connected) {
+      mini.appendChild(el("span", { class: calMsg && calMsg.err ? "cal-status err" : "hint", text: calMsg ? calMsg.text : "Calendar updated " + new Date(state.cal.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }));
+      mini.appendChild(el("button", { class: "link-btn", type: "button", text: "Refresh", onclick: function () { if (token) fetchDays(); else connect(); } }));
+      mini.appendChild(el("button", { class: "link-btn", type: "button", text: "Disconnect", onclick: disconnect }));
       return;
     }
     if (calMsg) box.appendChild(el("p", { class: "cal-status" + (calMsg.err ? " err" : ""), text: calMsg.text }));
-    var actions = el("div", { class: "cal-actions" });
-    if (state.cal.connected && calFresh()) {
-      var w = state.cal.week, n = Object.keys(state.cal.items || {}).reduce(function (a, k) { return a + state.cal.items[k].length; }, 0);
-      if (!calMsg) box.appendChild(el("p", { class: "cal-status", text: "Showing " + n + (n === 1 ? " meeting" : " meetings") + " from your Google Calendar for " + fmtYmd(w[1]) + "\u2013" + fmtYmd(w[5]) + ". Updated " + new Date(state.cal.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "." }));
-      actions.appendChild(el("button", { class: "btn", type: "button", text: "Refresh", onclick: function () { if (token) fetchWeek(); else connect(); } }));
-      actions.appendChild(el("button", { class: "btn", type: "button", text: "Disconnect", onclick: disconnect }));
-      if (C.dashboardEndpoint) box.appendChild(el("p", { class: "hint", text: "Your daily numbers (call tasks, callbacks, calling time and meeting counts, not meeting titles or who you're meeting) are shared with your manager." }));
-    } else {
-      if (!calMsg) box.appendChild(el("p", { class: "hint", text: state.cal.connected ? "Reconnect to load this week's meetings and plan your day." : "Your day is planned from your Google Calendar: meetings, demos, callbacks and calling blocks. Connect it to start. Read-only: the site can see your events but can't change them, and they stay in this browser." }));
-      actions.appendChild(el("button", { class: "btn btn-primary", type: "button", text: state.cal.connected ? "Reconnect Google Calendar" : "Connect my Google Calendar", onclick: connect }));
-    }
-    box.appendChild(actions);
+    box.appendChild(el("button", { class: "btn btn-primary btn-big", type: "button", text: state.cal.connected ? "Reconnect Google Calendar" : "Connect Google Calendar", onclick: connect }));
   }
-  function fmtYmd(ymd) { return Number(ymd.slice(5, 7)) + "/" + Number(ymd.slice(8, 10)); }
   function loadGis(cb) {
     if (window.google && window.google.accounts && window.google.accounts.oauth2) return cb();
     var sc = document.createElement("script");
-    sc.src = "https://accounts.google.com/gsi/client"; sc.async = true;
-    sc.onload = cb;
+    sc.src = "https://accounts.google.com/gsi/client"; sc.async = true; sc.onload = cb;
     sc.onerror = function () { calStatus("Couldn't reach Google. Check your internet connection and try again.", true); };
     document.head.appendChild(sc);
   }
   function connect() {
-    if (location.protocol === "file:") {
-      calStatus("Google sign-in only works when the site is opened from a web address (GitHub Pages, or localhost for testing), not by double-clicking the file. See the README.", true);
-      return;
-    }
+    if (location.protocol === "file:") { calStatus("Google sign-in only works from the site's web address, not a file on your computer.", true); return; }
     calStatus("Opening Google sign-in\u2026");
     loadGis(function () {
       try {
-        var client = window.google.accounts.oauth2.initTokenClient({
-          client_id: C.googleClientId,
-          scope: C.calendarScope,
+        window.google.accounts.oauth2.initTokenClient({
+          client_id: C.googleClientId, scope: C.calendarScope,
           callback: function (resp) {
             if (resp.error) { calStatus("Google didn't give access: " + resp.error + ".", true); return; }
-            token = resp.access_token; state.cal.connected = true; save(); fetchWeek();
+            token = resp.access_token; state.cal.connected = true; save(); fetchDays();
           },
           error_callback: function (e) {
-            calStatus(e && e.type === "popup_closed" ? "Sign-in was closed before it finished. Click Connect to try again." :
-              e && e.type === "popup_failed_to_open" ? "Your browser blocked the sign-in pop-up. Allow pop-ups for this site and try again." :
-              "Sign-in didn't work. Try again.", true);
+            calStatus(e && e.type === "popup_closed" ? "Sign-in was closed before it finished. Try again." :
+              e && e.type === "popup_failed_to_open" ? "Your browser blocked the sign-in pop-up. Allow pop-ups for this site and try again." : "Sign-in didn't work. Try again.", true);
           }
-        });
-        client.requestAccessToken({ prompt: state.cal.connected ? "" : "consent" });
+        }).requestAccessToken({ prompt: state.cal.connected ? "" : "consent" });
       } catch (err) { calStatus("Sign-in didn't start. Check the client ID in config.js.", true); }
     });
   }
-  function fetchWeek() {
-    var week = L.planWeek(new Date());
-    var from = new Date(week[1] + "T00:00:00Z"); from.setUTCDate(from.getUTCDate() - 1);
-    var to = new Date(week[5] + "T00:00:00Z"); to.setUTCDate(to.getUTCDate() + 2);
+  function fetchDays() {
+    var days = L.planDays(new Date());
+    var from = new Date(days[0] + "T00:00:00Z"); from.setUTCDate(from.getUTCDate() - 1);
+    var to = new Date(days[1] + "T00:00:00Z"); to.setUTCDate(to.getUTCDate() + 2);
     var url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250" +
       "&timeMin=" + encodeURIComponent(from.toISOString()) + "&timeMax=" + encodeURIComponent(to.toISOString()) +
       "&fields=" + encodeURIComponent("items(id,summary,description,htmlLink,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus))");
-    calStatus("Loading your meetings\u2026");
+    calStatus("Loading your calendar\u2026");
     fetch(url, { headers: { Authorization: "Bearer " + token } }).then(function (r) {
-      if (r.status === 401) { token = null; throw new Error("Your Google sign-in expired. Click Reconnect."); }
-      if (r.status === 403) throw new Error("Google blocked access. Your Workspace admin may need to allow this app (see the README).");
+      if (r.status === 401) { token = null; throw new Error("Your Google sign-in expired. Click Refresh."); }
+      if (r.status === 403) throw new Error("Google blocked access. Your Workspace admin may need to allow this app.");
       if (!r.ok) throw new Error("Google Calendar didn't respond (" + r.status + "). Try again in a minute.");
       return r.json();
     }).then(function (data) {
-      var byDate = {}; Object.keys(week).forEach(function (d) { byDate[week[d]] = +d; });
-      var items = { 1: [], 2: [], 3: [], 4: [], 5: [] }, allDay = { 1: [], 2: [], 3: [], 4: [], 5: [] }, blocks = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      var items = {}, allDay = {}, blocks = {};
+      days.forEach(function (d) { items[d] = []; allDay[d] = []; blocks[d] = []; });
       (data.items || []).forEach(function (ev) {
         var r = L.eventToItem(ev);
-        if (r.block) { if (byDate[r.block.date]) blocks[byDate[r.block.date]].push(r.block); }
-        else if (r.item && byDate[r.item.date]) items[byDate[r.item.date]].push(r.item);
-        else if (r.allDay && byDate[r.date]) allDay[byDate[r.date]].push({ label: r.label, outOfOffice: r.outOfOffice });
+        if (r.block) { if (blocks[r.block.date]) blocks[r.block.date].push(r.block); }
+        else if (r.item) { if (items[r.item.date]) items[r.item.date].push(r.item); }
+        else if (r.allDay && allDay[r.date]) allDay[r.date].push({ label: r.label, outOfOffice: r.outOfOffice });
       });
-      var keepHidden = (state.cal.hidden || []).filter(function (id) { return Object.keys(items).some(function (d) { return items[d].some(function (it) { return it.id === id; }); }); });
-      state.cal = { connected: true, week: week, items: items, allDay: allDay, blocks: blocks, hidden: keepHidden, fetchedAt: Date.now() };
+      var ids = []; days.forEach(function (d) { items[d].forEach(function (it) { ids.push(it.id); }); });
+      var keepHidden = (state.cal.hidden || []).filter(function (id) { return ids.indexOf(id) >= 0; });
+      state.cal = { connected: true, range: days, items: items, allDay: allDay, blocks: blocks, hidden: keepHidden, fetchedAt: Date.now() };
       save(); calMsg = null; renderDay();
     }).catch(function (err) { calStatus(err.message || "Couldn't load your calendar.", true); });
   }
@@ -1493,33 +1418,30 @@
   }
 
   function renderDay() {
-    renderDayToggle();
+    closeMenu();
+    renderConnect();
+    if (!calFresh()) return;
+    renderDaySwitch();
     var dd = dayData();
     if (document.activeElement !== $("mobile-tasks")) $("mobile-tasks").value = dd.mobileTasks || "";
     if (document.activeElement !== $("restaurant-tasks")) $("restaurant-tasks").value = dd.restaurantTasks || "";
-    var connected = calFresh();
-    ["day-toggle", "tasks", "day-main", "clear-day"].forEach(function (id) { if ($(id)) $(id).hidden = !connected; });
-    renderCalBox();
-    if (!connected) return;
-    closeMenu();
-    var cur = planFor(state.day);
-    renderCalendar(cur.plan);
+    var cur = planFor();
+    var tc = renderGoal(cur);
+    $("plan-title").textContent = dayName(state.date) === "Today" ? "Today's plan" : WEEKDAY[L.weekdayOf(state.date)] + "'s plan";
     renderRGA(cur.plan);
-    renderToday(cur);
-    var tc = renderTaskCheck(cur);
-    renderCalBox();
+    renderNotes(cur);
+    renderCalendar(cur.plan);
+    $("share-note").hidden = !C.dashboardEndpoint;
     queueReport(cur, tc);
   }
 
-  // ---------- Manager dashboard: share today's numbers (no meeting titles) ----------
+  // ---------- Manager dashboard: share the day's numbers (no meeting titles) ----------
   var reportTimer = null;
   function queueReport(cur, tc) {
     if (!C.dashboardEndpoint || !token || !tc) return;
-    var ymd = dayYmd(state.day);
-    if (ymd < L.tzParts(new Date()).ymd) return;            // only today and later
     var items = allItems(), rga = L.rgaSummary(cur.plan), dd = dayData();
     var day = {
-      date: ymd,
+      date: state.date,
       mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: tc.cbs,
       coldPlanned: tc.coldPlanned, goalCold: C.goalColdDials, goalCallbacks: C.goalCallbacks, onTrack: tc.onTrack,
       bookedMinutes: tc.bookedMin, mobileMinutes: Math.round(tc.cap.mobile), restaurantMinutes: Math.round(tc.cap.restaurant), flexMinutes: Math.round(tc.cap.flex),
@@ -1534,18 +1456,17 @@
     clearTimeout(reportTimer);
     reportTimer = setTimeout(function () {
       fetch(C.dashboardEndpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "report", token: token, day: day }) })
-        .catch(function () { /* the dashboard is best-effort; the rep's page keeps working */ });
+        .catch(function () { /* best effort */ });
     }, 1500);
   }
 
   function initDay() {
     load();
-    renderLegend();
     $("mobile-tasks").addEventListener("input", function () { dayData().mobileTasks = Math.max(0, Number(this.value) || 0); save(); renderDay(); });
     $("restaurant-tasks").addEventListener("input", function () { dayData().restaurantTasks = Math.max(0, Number(this.value) || 0); save(); renderDay(); });
     $("clear-day").addEventListener("click", function () {
-      if (!confirm("Clear your call tasks for " + DAYS[state.day] + "?")) return;
-      delete state.days[state.day]; save(); renderDay();
+      if (!confirm("Clear the call tasks you entered for " + dayName(state.date).toLowerCase().replace("today", "today") + "?")) return;
+      delete state.days[state.date]; save(); renderDay();
     });
     renderDay();
   }

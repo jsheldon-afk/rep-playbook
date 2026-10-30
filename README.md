@@ -1,6 +1,6 @@
 # Rep Playbook
 
-Right now only the **My day** tab is live. The **How it works** tab is hidden while it's being finished; set `showHowItWorks: true` in `config.js` to bring it back.
+Right now only the **My day** tab is live. It plans today and the next business day (on Fridays, Monday), so reps can set up tomorrow before they log off. The **How it works** tab is hidden while it's being finished; set `showHowItWorks: true` in `config.js` to bring it back.
 
 A two-tab site for Seated reps:
 
