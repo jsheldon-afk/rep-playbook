@@ -1,5 +1,7 @@
 # Rep Playbook
 
+Right now only the **My day** tab is live. The **How it works** tab is hidden while it's being finished; set `showHowItWorks: true` in `config.js` to bring it back.
+
 A two-tab site for Seated reps:
 
 1. **How it works**: the operations flow, how to log calls, the reject reason finder, the 5-callback rule, and a "What do I do next?" simulator.
@@ -40,6 +42,24 @@ python3 -m http.server 8000
 
 Then go to `http://localhost:8000` in your browser. Everything else on the site works fine by double-clicking.
 
+## Manager dashboard
+`dashboard.html` shows managers what each rep is set up to do: cold dials and callbacks against 120 and 10, calling time booked and how much of it they'll use, RGA share, expected meetings, demos, and who hasn't opened their plan. It also shows two-week averages per rep. It never stores meeting titles or prospect names.
+
+How it works: each rep's page sends a one-line summary of their day to a small Apps Script attached to a Google Sheet. The script checks the rep's Google sign-in, so only Seated accounts can send numbers and only managers listed in the sheet can read them.
+
+Setup (about 15 minutes):
+1. In Google Cloud, open **Data access** for the Rep Playbook app and add the scope `.../auth/userinfo.email` (non-sensitive). Reps approve it once the next time they connect.
+2. Create a blank Google Sheet called "Rep Playbook Data". Open **Extensions > Apps Script**, delete the sample code and paste in `apps-script/Code.gs`. Save.
+3. In the function menu at the top, pick **setup** and click **Run**. Approve the permissions. This creates the Managers, Reps and Daily tabs and adds you as a manager.
+4. Add other managers' emails to the **Managers** tab, and every rep's email and name to the **Reps** tab (used for names and for "hasn't opened their plan").
+5. Click **Deploy > New deployment**, choose **Web app**, set **Execute as: Me** and **Who has access: Anyone**, and click **Deploy**. ("Anyone" lets the site reach it; the script itself checks every sign-in.)
+6. Copy the **Web app URL** into `dashboardEndpoint` in `config.js`, and upload `config.js`, `app.js`, `dashboard.html` and `dashboard.js`.
+7. Managers open `https://jsheldon-afk.github.io/rep-playbook/dashboard.html` and sign in.
+
+Tell reps before you turn it on. Their page shows a line saying their daily numbers are shared with their manager.
+
+If you change `Code.gs` later, use **Deploy > Manage deployments > Edit > New version** so the URL stays the same.
+
 ## Publish on GitHub Pages
 1. Create a repository and upload `index.html`, `styles.css`, `config.js`, `app.js` and this README to the root.
 2. In the repository, go to **Settings → Pages**.
@@ -64,6 +84,8 @@ Calling time a rep blocks on their own calendar ("Call block", "Power hour", "Di
 Change the callback words in `callbackRules` in `config.js`.
 
 ## The daily goal and plan
+Every block is tagged RGA (revenue generating: calling, rebooks, demos and follow-ups with prospects) or non-RGA (prep, practice, internal meetings, lead cleaning, lunch, breaks, demo prep and wrap-up), and the page shows the split for the day. Demos and follow-ups get 10 minutes of prep before and a 10-minute wrap-up after (log it in Salesforce, send the follow-up email). Clicking a block shows what to do and tips; edit those in `blockTypes` and `meetingGuides` in `config.js`. Calling blocks added with + Calendar are marked "free" so prospects can still be booked over them.
+
 The goal is "120 and 10": 120 cold dials and 10 callbacks a day (`goalColdDials`, `goalCallbacks` in `config.js`). The My day tab shows whether each rep's tasks, calendar and callbacks get them there.
 
 Non-calling time is: meetings (from the calendar), demo prep (10 minutes before each demo), day organization prep (9:00), cold call bot practice (30 minutes, every rep, every day, 9:30 by default), a 45-minute lunch (12:30), two 15-minute breaks (2:45 and 5:00) and cleaning leads (5:15). If a meeting covers bot practice, the site moves it to the nearest free half hour. Times and lengths are in the `defaultDay`, `thuFriDay` and `reflow` settings in `config.js`.

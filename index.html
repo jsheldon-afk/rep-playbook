@@ -9,8 +9,8 @@
 <body>
 <header class="site-head">
   <div class="wrap">
-    <p class="brand">Rep Playbook <small>How we work, and how to plan your calling day</small></p>
-    <nav class="tabs" aria-label="Sections">
+    <p class="brand">Rep Playbook <small>Plan your calling day</small></p>
+    <nav class="tabs" id="tabs" aria-label="Sections">
       <a href="#how-it-works" id="tab-how">1. How it works</a>
       <a href="#my-day" id="tab-day">2. My day</a>
     </nav>
@@ -83,7 +83,8 @@
 
     <div id="day-main">
       <div class="changes" id="today" aria-live="polite"></div>
-      <p class="hint" id="cal-hint">Click a meeting to ignore it (and call during it) or to mark it as a callback.</p>
+      <p class="hint" id="cal-hint">Click any block to see what to do in it. Click a meeting or callback to change how it's treated. Callbacks don't block time: dial them from inside your calling blocks.</p>
+      <div class="rga-bar" id="rga-bar"></div>
       <div class="legend" id="legend"></div>
       <div class="calendar" id="calendar"></div>
     </div>

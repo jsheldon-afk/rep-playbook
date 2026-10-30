@@ -3,12 +3,15 @@
  * Everything the site shows or calculates lives here, so a manager can update it
  * without touching app.js. Keep names spelled EXACTLY as they appear in Nooks and Salesforce.
  *
- * Source for every rate below: Seated calls library, Jul 31 - Oct 28 2026, based on 8 reps:
- * Eliana, Jack, Hector, Madeleine, acenteno, dregan, Joe and nburroughs.
+ * Source for every rate below: Seated calls library, Jul 31 - Oct 28 2026, based on 8 of the team's
+ * active cold callers (the list is kept off this public file).
  * Cold rates count cadence dials within the caps (3 tries on a mobile, 5 on a restaurant line);
  * existing-opp, billing and internal calls removed.
  */
 window.CONFIG = {
+  // The "How it works" tab is still being finished. Set to true to bring it back.
+  showHowItWorks: false,
+
   // ---------- Time ----------
   repTimezoneLabel: "Eastern Time (ET)",
   // TO CONFIRM: our three calling time zones. offsetFromET: hours behind Eastern.
@@ -34,7 +37,11 @@ window.CONFIG = {
   // ---------- Google Calendar ----------
   // Paste the OAuth client ID from Google Cloud here (see README). Leave "" to hide the feature.
   googleClientId: "660445438110-v7njmd3pkaooh5ighga54gkn7ie64c4o.apps.googleusercontent.com",
-  calendarScope: "https://www.googleapis.com/auth/calendar.events.readonly",
+  // "email" lets the manager dashboard confirm who sent each day's numbers.
+  calendarScope: "https://www.googleapis.com/auth/calendar.events.readonly email",
+  // Web app URL of the Apps Script that stores daily numbers for the manager dashboard (see README).
+  // Leave "" to keep everything in each rep's browser.
+  dashboardEndpoint: "",
   repTimeZone: "America/New_York",
   // Calling blocks added from the site carry this tag in their notes, so the site
   // recognizes them when it reads the calendar and doesn't treat them as meetings.
@@ -190,14 +197,14 @@ window.CONFIG = {
   ],
 
   // ---------- Daily templates (times in ET) ----------
-  // type: prep | practice | callbacks | mobile | restaurant | prime | sweep | lunch | break | leads | wrap
+  // type: prep | practice | rebooks | mobile | restaurant | prime | sweep | lunch | break | leads | wrap
   // Non-calling time: meetings (from the calendar), demo prep, day organization prep,
   // cold call bot practice (30 minutes, everyone, every day), cleaning leads,
   // a 45-minute lunch and two 15-minute afternoon breaks.
   defaultDay: [
     { start: "09:00", end: "09:30", type: "prep" },
     { start: "09:30", end: "10:00", type: "practice" },
-    { start: "10:00", end: "10:30", type: "callbacks" },
+    { start: "10:00", end: "10:30", type: "rebooks" },
     { start: "10:30", end: "12:30", type: "mobile" },
     { start: "12:30", end: "13:15", type: "lunch" },
     { start: "13:15", end: "14:00", type: "restaurant" },
@@ -213,7 +220,7 @@ window.CONFIG = {
   thuFriDay: [
     { start: "09:00", end: "09:30", type: "prep" },
     { start: "09:30", end: "10:00", type: "practice" },
-    { start: "10:00", end: "10:30", type: "callbacks" },
+    { start: "10:00", end: "10:30", type: "rebooks" },
     { start: "10:30", end: "12:30", type: "mobile" },
     { start: "12:30", end: "13:15", type: "lunch" },
     { start: "13:15", end: "14:30", type: "restaurant" },
@@ -226,23 +233,61 @@ window.CONFIG = {
     { start: "17:45", end: "18:00", type: "wrap" }
   ],
 
+  // rga: true = revenue generating activity (talking to prospects). Shown on the right of the calendar.
+  // doThis / tips: what reps see when they click a block. Edit freely.
   blockTypes: {
-    prep:       { label: "Day organization prep", dials: false, why: "No dialing. Build today's callback list, check your calendar and load your lists sorted by time zone." },
-    practice:   { label: "Cold call bot practice", dials: false, why: "30 minutes with the Nooks practice bots. Warm up before your first real dial." },
-    leads:      { label: "Clean leads", dials: false, why: "Fix bad numbers, add owner names and cells you learned today, and load tomorrow's lists." },
-    callbacks:  { label: "Callbacks + Missed Meeting rebooks", dials: true, rate: "missedMeetingRebook", why: "Callbacks booked within a day convert at 18%. Do them before any new dial." },
-    mobile:     { label: "Mobile block", dials: true, rate: "mobileBlock", why: "Owners pick up their cells late morning to early afternoon. Fresh mobiles first." },
-    restaurant: { label: "Restaurant block", dials: true, rate: "restaurantBlock", why: "Restaurant lines work in the afternoon, after the lunch rush." },
-    prime:      { label: "Restaurant prime time", dials: true, rate: "restaurantPrime", why: "The best restaurant-line window of the day." },
-    sweep:      { label: "Callback sweep", dials: true, rate: "callback", why: "Call back everyone who asked today. Same-day follow-up converts best." },
-    lunch:      { label: "Lunch", dials: false, why: "Restaurants are mid-rush. Take your lunch." },
-    break:      { label: "Break", dials: false, why: "15 minutes away from the phone." },
-    wrap:       { label: "Wrap-up", dials: false, why: "Check every call has the right disposition and sentiment. Set tomorrow's Nooks reminders." }
+    prep: { label: "Day organization prep", dials: false, rga: false,
+      why: "Get set up before your first dial.",
+      doThis: ["Set up your calendar: book today's calling blocks and check your meetings.", "Make sure your pipeline in Salesforce is clean and up to date.", "Check you have enough leads for today (120 cold calls).", "Clear or plan any outstanding tasks in Salesloft."],
+      tips: ["Add any missing calling blocks from this page with + Calendar, then click Refresh.", "Look at today's callbacks so you know who to expect."] },
+    practice: { label: "Cold call bot practice", dials: false, rga: false,
+      why: "30 minutes with the Nooks practice bots. Warm up before your first real dial.",
+      doThis: ["Run practice calls with the Nooks cold calling bots for 30 minutes."],
+      tips: ["Practice the opener you'll use in your first block.", "Work on the objection that cost you the most demos yesterday."] },
+    rebooks: { label: "Missed meeting rebooks", dials: true, rga: true, rate: "missedMeetingRebook",
+      why: "Rebook every demo that didn't happen. Done early? Start your mobile block.",
+      doThis: ["Call everyone in your Missed Meeting (Nooks) cadence and rebook their demo.", "Reschedule any demo that needs a new time."],
+      tips: ["Rebooks book about 3% of dials, nearly 3 times a cold dial.", "No missed meetings today? Start your mobile block early."] },
+    mobile: { label: "Mobile block", dials: true, rga: true, rate: "mobileBlock",
+      why: "Owners pick up their cells late morning to early afternoon. Fresh mobiles first.",
+      doThis: ["Call from your Mobile (Nooks) cadence.", "Turn Smart Presence on.", "Filter by time zone to the zones shown on this block."],
+      tips: ["Fresh mobiles first: 1st and 2nd tries book best. Stop after 3 tries on a number.", "Ran out of calls? Use the smart lists: \u201cDidn't Answer - today\u201d, \u201cDidn't answer - yesterday\u201d, \u201cGold List - DM Asked For Callback or Email in Last 30 Days\u201d.", "Callbacks due during this block: dial them when their time comes, then keep going."] },
+    restaurant: { label: "Restaurant block", dials: true, rga: true, rate: "restaurantBlock",
+      why: "Restaurant lines work in the afternoon, after the lunch rush.",
+      doThis: ["Call from your Restaurant (Nooks) cadence.", "Turn Smart Presence on.", "Filter by time zone to the zones shown on this block."],
+      tips: ["Expect a gatekeeper. Get the owner's name, when they're in and a better number.", "Stop after 5 tries on a number.", "Never call during lunch rush or after 5 PM in the restaurant's time zone."] },
+    prime: { label: "Restaurant prime time", dials: true, rga: true, rate: "restaurantPrime",
+      why: "The best restaurant-line window of the day.",
+      doThis: ["Call from your Restaurant (Nooks) cadence.", "Turn Smart Presence on.", "Filter by time zone to the zones shown on this block."],
+      tips: ["This is when owners are on site before dinner. Ask for them by name.", "Protect this block: move internal meetings out of it."] },
+    sweep: { label: "Callback sweep", dials: true, rga: true, rate: "callback",
+      why: "Call back everyone who asked today. Same-day follow-up converts best.",
+      doThis: ["Call back every owner who asked for a callback today.", "Set a Nooks reminder for anyone you don't reach."],
+      tips: ["Callbacks within a day book about 16%; after 3 days, about 9%.", "Each callback gets 5 tries on different days and times."] },
+    lunch: { label: "Lunch", dials: false, rga: false, why: "Restaurants are mid-rush. Take your lunch.",
+      doThis: ["Step away from the phone."], tips: [] },
+    break: { label: "Break", dials: false, rga: false, why: "15 minutes away from the phone.",
+      doThis: ["Step away from the phone."], tips: [] },
+    leads: { label: "Clean leads", dials: false, rga: false,
+      why: "Fix bad numbers, add owner names and cells you learned today, and load tomorrow's lists.",
+      doThis: ["Mark bad numbers and remove dead contacts.", "Add owner names and cells you learned today.", "Make sure tomorrow has enough leads loaded."],
+      tips: ["Every owner cell you add moves that lead into the stronger mobile list."] },
+    wrap: { label: "Wrap-up", dials: false, rga: false,
+      why: "Check every call has the right disposition and sentiment. Set tomorrow's Nooks reminders.",
+      doThis: ["Check every call today has the right disposition and sentiment.", "Set Nooks reminders for tomorrow's callbacks."],
+      tips: [] }
   },
+  // Fixed blocks around prospect meetings (demos and follow-ups).
+  demoWrapMinutes: 10,
+  meetingGuides: {
+    prep: { doThis: ["Review the restaurant and your notes in Salesforce.", "Open the demo deck and test your meeting link."], tips: [] },
+    post: { doThis: ["Log the demo or follow-up in Salesforce.", "Send the follow-up email while it's fresh."], tips: [] }
+  },
+
 
   // Rules for moving blocks around meetings (times in ET, "HH:MM").
   reflow: {
-    morningCallbackWindow: ["09:00", "12:00"],
+    morningCallbackWindow: ["09:00", "12:00"],   // where missed meeting rebooks can move
     afternoonSweepWindow: ["14:30", "17:00"],
     lunchWindow: ["11:30", "14:00"],
     minCallbackMinutes: 30,
