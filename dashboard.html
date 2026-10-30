@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rep Playbook: Team dashboard</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-head">
+  <div class="wrap">
+    <p class="brand">Rep Playbook <small>Team dashboard for managers</small></p>
+  </div>
+</header>
+<main class="wrap">
+  <p class="tab-intro">What each rep is set up to do today, from their calendar and call tasks. These are plans, not actual dials.</p>
+  <div class="panel" id="d-auth"></div>
+  <div id="d-main" hidden>
+    <div class="day-toggle" id="d-dates" role="group" aria-label="Pick a date"></div>
+    <div class="dash-summary" id="d-summary"></div>
+    <section class="block">
+      <h2 id="d-day-title">Today</h2>
+      <div class="table-scroll"><table class="check-table" id="d-day"></table></div>
+      <p class="hint" id="d-missing"></p>
+    </section>
+    <section class="block">
+      <h2>Last 2 weeks</h2>
+      <p class="lede">Averages over the days each rep used the page.</p>
+      <div class="table-scroll"><table class="check-table" id="d-week"></table></div>
+    </section>
+  </div>
+</main>
+<script src="config.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

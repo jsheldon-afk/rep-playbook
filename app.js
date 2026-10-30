@@ -39,7 +39,7 @@
       return inWin(t, W.restaurant) && !inWin(t, W.lunchRush) && t < L.toMin(W.dinnerStart);
     }
     if (type === "primeLocal") return inWin(t, W.restaurantPrime);
-    if (type === "callbacks" || type === "sweep") return t >= L.toMin(W.callbackEarliest) && t < L.toMin(W.dinnerStart);
+    if (type === "rebooks" || type === "sweep") return t >= L.toMin(W.callbackEarliest) && t < L.toMin(W.dinnerStart);
     return false;
   };
   L.zonesFor = function (type, etMin) {
@@ -62,16 +62,22 @@
     }
     // Fixed intervals
     var fixedList = [];
+    var callbacks = [];
     items.forEach(function (it, idx) {
-      var end = it.type === "callback" ? it.start + 15 : it.end;
-      fixedList.push({ start: it.start, end: end, label: it.label, kind: it.type, idx: idx, item: it });
+      // Callbacks don't block time: you dial them from inside your calling blocks,
+      // and most don't pick up. They're shown beside the calendar instead.
+      if (it.type === "callback") { callbacks.push(it); return; }
+      fixedList.push({ start: it.start, end: it.end, label: it.label, kind: it.type, idx: idx, item: it });
       if (it.type === "meeting" && L.isDemo(it)) {
-        fixedList.push({ start: it.start - C.demoPrepMinutes, end: it.start, label: "Demo prep", kind: "prep", idx: idx });
+        var fu = L.demoKind(it) === "Follow-up";
+        fixedList.push({ start: it.start - C.demoPrepMinutes, end: it.start, label: fu ? "Follow-up prep" : "Demo prep", kind: "prep", idx: idx });
+        fixedList.push({ start: it.end, end: it.end + C.demoWrapMinutes, label: (fu ? "Follow-up" : "Demo") + " wrap-up: log it in Salesforce, send the follow-up email", kind: "post", idx: idx });
       }
     });
     slots.forEach(function (s) {
       fixedList.forEach(function (f) {
-        if (f.start < s.end && f.end > s.start && (!s.fixed || f.kind !== "prep")) s.fixed = f;
+        // Meetings win over the prep and wrap-up time around other meetings.
+        if (f.start < s.end && f.end > s.start && (!s.fixed || (f.kind !== "prep" && f.kind !== "post"))) s.fixed = f;
       });
       if (s.fixed) s.type = "fixed";
     });
@@ -82,7 +88,7 @@
       if (L.zonesFor("restaurant", s.start).length && s.start >= L.toMin("13:00")) return "restaurant";
       if (L.zonesFor("mobile", s.start).length) return "mobile";
       if (L.zonesFor("restaurant", s.start).length) return "restaurant";
-      return "callbacks";
+      return "rebooks";
     }
     function lostSlots(type) { return slots.filter(function (s) { return s.base === type && s.fixed; }).length; }
 
@@ -117,12 +123,12 @@
 
     var R = C.reflow, cbNeed = R.minCallbackMinutes / step, lunchNeed = R.lunchMinutes / step;
     var templateAt = function (type) { return template.filter(function (b) { return b.type === type; })[0]; };
-    var cbOrig = templateAt("callbacks"), swOrig = templateAt("sweep"), luOrig = templateAt("lunch");
+    var cbOrig = templateAt("rebooks"), swOrig = templateAt("sweep"), luOrig = templateAt("lunch");
 
-    if (lostSlots("callbacks")) {
+    if (lostSlots("rebooks")) {
       var cw0 = L.toMin(R.morningCallbackWindow[0]), cw1 = L.toMin(R.morningCallbackWindow[1]);
-      var ok1 = ensure("callbacks", cbNeed, cw0, cw1, ["mobile", "restaurant"]) || ensure("callbacks", cbNeed, cw0, cw1, ["mobile", "restaurant", "prep"]);
-      if (!ok1) notes.push("No room for morning callbacks before noon. Make your callbacks first thing after your meetings.");
+      var ok1 = ensure("rebooks", cbNeed, cw0, cw1, ["mobile", "restaurant"]) || ensure("rebooks", cbNeed, cw0, cw1, ["mobile", "restaurant", "prep"]);
+      if (!ok1) notes.push("No room for missed meeting rebooks before noon. Rebook no-shows first thing after your meetings.");
     }
     if (lostSlots("sweep")) {
       var ok2 = ensure("sweep", cbNeed, L.toMin(R.afternoonSweepWindow[0]), L.toMin(R.afternoonSweepWindow[1]), ["mobile", "restaurant", "prime"]);
@@ -179,10 +185,34 @@
       notes.push("Your wrap-up time is taken. Check today's dispositions and set tomorrow's reminders before you log off.");
     }
 
-    return { slots: slots, notes: notes, fixedList: fixedList, template: template };
+    return { slots: slots, notes: notes, fixedList: fixedList, callbacks: callbacks, template: template };
+  };
+
+  // Revenue generating activity: talking to prospects. Calling blocks, demos and follow-ups.
+  L.isRGA = function (slot) {
+    if (slot.fixed) return slot.fixed.kind === "meeting" && !!slot.fixed.item && L.isDemo(slot.fixed.item);
+    var bt = C.blockTypes[slot.type];
+    return !!(bt && bt.rga);
+  };
+  L.rgaSummary = function (plan) {
+    var rga = 0, non = 0;
+    plan.slots.forEach(function (s) { if (L.isRGA(s)) rga += C.slotMinutes; else non += C.slotMinutes; });
+    return { rga: rga, non: non, share: rga / Math.max(1, rga + non) };
   };
 
   // Group slots into calendar blocks.
+  // Revenue generating activity: talking to prospects. Calling blocks, demos and follow-ups.
+  L.isRGA = function (slot) {
+    if (slot.fixed) return slot.fixed.kind === "meeting" && !!slot.fixed.item && L.isDemo(slot.fixed.item);
+    var bt = C.blockTypes[slot.type];
+    return !!(bt && bt.rga);
+  };
+  L.rgaSummary = function (plan) {
+    var rga = 0, non = 0;
+    plan.slots.forEach(function (s) { if (L.isRGA(s)) rga += C.slotMinutes; else non += C.slotMinutes; });
+    return { rga: rga, non: non, share: rga / Math.max(1, rga + non) };
+  };
+
   // Group slots into calendar blocks. Same type in a row = one block, even when the
   // time zones being called change partway through; whoLine explains when each zone starts.
   L.blocks = function (plan) {
@@ -220,7 +250,7 @@
       return txt;
     });
     var what = t === "mobile" ? "mobiles" : (t === "restaurant" || t === "prime") ? "restaurants" : "owners";
-    var lunchy = (t === "callbacks" || t === "sweep") ? zs.filter(function (z) { return inWin(L.local(b.start, z), W.lunchRush); }) : [];
+    var lunchy = (t === "rebooks" || t === "sweep") ? zs.filter(function (z) { return inWin(L.local(b.start, z), W.lunchRush); }) : [];
     var extra = lunchy.length ? " (" + lunchy.map(function (z) { return z.name; }).join(", ") + ": mobiles only, it's lunch rush there)" : "";
     return "Calling " + names.join(" + ") + " " + what + ": " + parts.join("; ") + extra;
   };
@@ -229,7 +259,7 @@
   L.estimate = function (plan, callbacksDue, dialTarget) {
     var rates = C.bookingRatePerDial;
     var blocks = L.blocks(plan).filter(function (b) { return b.type !== "fixed" && C.blockTypes[b.type] && C.blockTypes[b.type].dials; });
-    var agreed = plan.fixedList.filter(function (f) { return f.kind === "callback"; }).length;
+    var agreed = (plan.callbacks || []).length;
     blocks.forEach(function (b) { b.cap = (b.end - b.start) / 60 * C.dialsPerHour; b.used = 0; b.cbUsed = 0; });
     var capacity = blocks.reduce(function (a, b) { return a + b.cap; }, 0);
     var callbackFixedDials = agreed; // one dial each, at their fixed time
@@ -239,7 +269,7 @@
     // 1) callback dials into callback blocks, in time order
     var cbLeft = Math.min(cbNeeded, remainingTarget);
     blocks.forEach(function (b) {
-      if (b.type !== "callbacks" && b.type !== "sweep") return;
+      if (b.type !== "rebooks" && b.type !== "sweep") return;
       var x = Math.min(cbLeft, b.cap); b.cbUsed = x; b.used = x; cbLeft -= x;
     });
     var cbPlaced = Math.min(cbNeeded, remainingTarget) - cbLeft;
@@ -265,9 +295,9 @@
     blocks.forEach(function (b) {
       add("Callbacks", b.cbUsed, rates.callback);
       var key = C.blockTypes[b.type].rate;
-      var spare = b.type === "sweep" || b.type === "callbacks";
+      var spare = b.type === "sweep" || b.type === "rebooks";
       var r = spare ? rates.mobileBlock : rates[key];
-      var label = spare ? "Spare callback time (dial mobiles)" : C.blockTypes[b.type].label;
+      var label = spare ? "Spare rebook time (dial mobiles)" : C.blockTypes[b.type].label;
       if (b.type === "prime" && !b.zones.some(function (zn) {
         var z = C.zones.filter(function (q) { return q.name === zn; })[0];
         return L.zoneOk("primeLocal", b.start, z);
@@ -403,6 +433,7 @@
       "&text=" + encodeURIComponent(o.title) +
       "&dates=" + f(o.start) + "/" + f(o.end) +
       "&details=" + encodeURIComponent(o.details || "") +
+      (o.free ? "&trp=false" : "") +
       "&ctz=" + encodeURIComponent(C.repTimeZone);
   };
   L.ymdLocal = function (d) {
@@ -1022,7 +1053,7 @@
     if (blockOnCal(state.day, b)) return el("span", { class: "cal-add on", text: "\u2713 On calendar" });
     var who = L.whoLine(b);
     return addLink("+ Calendar", L.gcalLink({
-      ymd: dayYmd(state.day), start: b.start, end: b.end,
+      ymd: dayYmd(state.day), start: b.start, end: b.end, free: true,
       title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
       details: [who, bt.why, "", C.calendarBlockTag].join("\n")
     }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
@@ -1067,6 +1098,39 @@
     }
     save(); renderDay();
   }
+  // Clicking a block shows what to do in it, with tips.
+  function makeInfo(node, info) {
+    node.classList.add("clickable");
+    node.setAttribute("tabindex", "0");
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-label", info.title + ", " + info.when + ". Show what to do");
+    node.addEventListener("click", function (e) { if (e.target.closest("a")) return; e.stopPropagation(); showInfo(node, info); });
+    node.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showInfo(node, info); } });
+  }
+  function showInfo(anchor, info) {
+    closeMenu();
+    var menu = el("div", { class: "cal-menu cal-info", role: "dialog", "aria-label": info.title });
+    menu.appendChild(el("p", { class: "cal-menu-title", text: info.title }));
+    menu.appendChild(el("p", { class: "hint", style: "margin:0 6px 6px", text: info.when + " ET" }));
+    if (info.who) menu.appendChild(el("p", { style: "margin:0 6px 8px;font-size:0.88rem", text: info.who }));
+    var g = info.guide || {};
+    if (g.doThis && g.doThis.length) {
+      menu.appendChild(el("p", { class: "info-h", text: "What to do" }));
+      var ul = el("ul", { class: "info-list" }); g.doThis.forEach(function (t) { ul.appendChild(el("li", { text: t })); }); menu.appendChild(ul);
+    }
+    if (g.tips && g.tips.length) {
+      menu.appendChild(el("p", { class: "info-h", text: "Tips" }));
+      var ul2 = el("ul", { class: "info-list" }); g.tips.forEach(function (t) { ul2.appendChild(el("li", { text: t })); }); menu.appendChild(ul2);
+    }
+    var foot = el("div", { class: "info-foot" });
+    if (info.link) foot.appendChild(info.link);
+    foot.appendChild(el("button", { type: "button", class: "btn", text: "Close", onclick: function () { closeMenu(); anchor.focus(); } }));
+    menu.appendChild(foot);
+    menu.style.top = (anchor.offsetTop + Math.min(anchor.offsetHeight, 44)) + "px";
+    $("calendar").appendChild(menu);
+    openMenu = menu;
+    menu.querySelector("button").focus();
+  }
   var openMenu = null;
   function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
   function showMenu(anchor, it) {
@@ -1075,7 +1139,7 @@
     var cur = it.ignored ? "ignore" : it.type;
     var menu = el("div", { class: "cal-menu", role: "menu", "aria-label": "How to treat " + it.label });
     menu.appendChild(el("p", { class: "cal-menu-title", text: it.label }));
-    [["meeting", "Meeting", "Blocks this time"], ["callback", "Callback", "15 minutes, counts as a callback"], ["ignore", "Ignore", "Call during it"]].forEach(function (o) {
+    [["meeting", "Meeting", "Blocks this time"], ["callback", "Callback", "Dial it during a calling block; doesn't block time"], ["ignore", "Ignore", "Call during it"]].forEach(function (o) {
       menu.appendChild(el("button", { type: "button", role: "menuitemradio", "aria-checked": String(cur === o[0]), class: cur === o[0] ? "on" : null,
         onclick: function () { closeMenu(); setTreatment(it, o[0]); } }, [el("strong", { text: o[1] }), el("span", { text: o[2] })]));
     });
@@ -1084,7 +1148,7 @@
     openMenu = menu;
     menu.querySelector("button.on, button").focus();
   }
-  document.addEventListener("click", function (e) { if (openMenu && !openMenu.contains(e.target) && !e.target.closest(".cal-block.clickable, .ign-undo")) closeMenu(); });
+  document.addEventListener("click", function (e) { if (openMenu && !openMenu.contains(e.target) && !e.target.closest(".cal-block.clickable, .ign-undo, .cb-pill")) closeMenu(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
 
   var LOCK = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5" width="8" height="6" rx="1" fill="currentColor"/><path d="M4 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
@@ -1109,7 +1173,8 @@
         title = f.kind === "callback" ? "Callback: " + String(f.label).replace(/^\s*REMINDER\s*-\s*/i, "") : (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
         li.appendChild(el("div", { class: "b-title", html: LOCK + "<span></span>" }));
         li.lastChild.lastChild.textContent = title;
-        if (f.item && f.kind !== "prep") (function (item, node) {
+        if ((f.kind === "prep" || f.kind === "post") && C.meetingGuides[f.kind]) makeInfo(li, { title: f.label, when: L.fmtRange(f.start, f.end), who: "", why: "", guide: C.meetingGuides[f.kind], link: null });
+        if (f.item && f.kind !== "prep" && f.kind !== "post") (function (item, node) {
           node.classList.add("clickable");
           node.setAttribute("tabindex", "0");
           node.setAttribute("role", "button");
@@ -1127,11 +1192,30 @@
         li.appendChild(el("div", { class: "b-title" }, [addEl, title, el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
         if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who }));
         if (h >= 88) li.appendChild(el("div", { class: "b-why", text: why }));
-        li.setAttribute("title", [title, L.fmtRange(b.start, b.end) + " ET", who, why].filter(Boolean).join("\n"));
+        makeInfo(li, { title: title, when: L.fmtRange(b.start, b.end), who: who, why: why, guide: bt, link: addEl ? blockLinkEl(b) : null });
       }
       list.appendChild(li);
+      // RGA tag in the column on the right
+      var rga = b.type === "fixed" ? (b.fixed.kind === "meeting" && b.fixed.item && L.isDemo(b.fixed.item)) : !!(C.blockTypes[b.type] && C.blockTypes[b.type].rga);
+      cal.appendChild(el("div", { class: "rga-tag " + (rga ? "is-rga" : "non-rga"), style: "top:" + (px(b.start) + 1) + "px;height:" + (h - 2) + "px", "aria-hidden": "true" }, [h >= 20 ? (rga ? "RGA" : "Non-RGA") : ""]));
     });
     cal.appendChild(list);
+    // Callbacks: pills in a lane on the right. They don't block calling time.
+    var cbs = (plan.callbacks || []).filter(function (it) { return it.start >= start && it.start < end; });
+    cal.classList.toggle("has-lane", cbs.length > 0);
+    var laneUsed = {};
+    cbs.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (it) {
+      var top = px(it.start);
+      var key = Math.floor(top / (slotPx * 0.8));
+      while (laneUsed[key]) key++;            // nudge down if two callbacks share a time
+      laneUsed[key] = true;
+      var y = Math.max(top, key * slotPx * 0.8);
+      var name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
+      var pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.fmt(it.start) + " " + it.label,
+        "aria-label": "Callback at " + L.fmt(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.fmt(it.start) }), " " + name]);
+      pill.addEventListener("click", function (e) { e.stopPropagation(); showMenu(pill, it); });
+      cal.appendChild(pill);
+    });
     // Ignored meetings: a dashed outline over the calling time, with an Undo button.
     listItems().filter(function (it) { return it.ignored && it.end > start && it.start < end; }).forEach(function (it) {
       var a = Math.max(it.start, start), z = Math.min(it.type === "callback" ? it.start + 15 : it.end, end);
@@ -1142,12 +1226,21 @@
     });
   }
 
+  function renderRGA(plan) {
+    var r = L.rgaSummary(plan), box = $("rga-bar"); box.innerHTML = "";
+    var pctR = Math.round(r.share * 100);
+    box.appendChild(el("p", { html: "<strong>RGA time:</strong> " + L.dur(r.rga) + " (" + pctR + "%). <strong>Non-RGA:</strong> " + L.dur(r.non) + " (" + (100 - pctR) + "%)." }));
+    box.appendChild(el("div", { class: "rga-meter", role: "img", "aria-label": pctR + "% of the day is revenue generating" }, [el("div", { class: "rga-fill", style: "width:" + pctR + "%" })]));
+  }
   function renderLegend() {
     var lg = $("legend"); lg.innerHTML = "";
-    ["prep", "practice", "callbacks", "mobile", "restaurant", "prime", "sweep", "lunch", "break", "leads", "wrap"].forEach(function (t) {
+    ["prep", "practice", "rebooks", "mobile", "restaurant", "prime", "sweep", "lunch", "break", "leads", "wrap"].forEach(function (t) {
       lg.appendChild(el("span", null, [el("i", { class: "t-" + t }), C.blockTypes[t].label]));
     });
-    lg.appendChild(el("span", null, [el("i", { class: "t-fixed" }), "Meetings and agreed callbacks (fixed)"]));
+    lg.appendChild(el("span", null, [el("i", { class: "t-fixed" }), "Meetings (fixed)"]));
+    lg.appendChild(el("span", null, [el("i", { class: "rga-swatch is-rga" }), "RGA: talking to prospects"]));
+    lg.appendChild(el("span", null, [el("i", { class: "rga-swatch non-rga" }), "Non-RGA"]));
+    lg.appendChild(el("span", null, [el("i", { class: "t-cbpill" }), "Callbacks (dial them during your blocks)"]));
   }
 
   function describeChanges(plan, est) {
@@ -1158,28 +1251,23 @@
       if (b.type === "prime" || b.type === "restaurant") msgs.push("Restaurant-line time your meetings covered moved to " + when + "." + (w ? " You're " + w.charAt(0).toLowerCase() + w.slice(1) + "." : ""));
       else msgs.push(C.blockTypes[b.type].label + " moved to " + when + "." + (w ? " You're " + w.charAt(0).toLowerCase() + w.slice(1) + "." : ""));
     });
-    var lost = {};
-    plan.slots.forEach(function (s) { if (s.fixed && s.base && C.blockTypes[s.base].dials) lost[s.base] = (lost[s.base] || 0) + C.slotMinutes; });
-    var gained = {};
-    plan.slots.forEach(function (s) { if (!s.fixed && s.moved) gained[s.type] = (gained[s.type] || 0) + C.slotMinutes; });
-    plan.slots.forEach(function (s) { if (!s.fixed && s.moved && s.base && s.base !== s.type && C.blockTypes[s.base].dials) lost[s.base] = (lost[s.base] || 0) + C.slotMinutes; });
-    Object.keys(lost).forEach(function (t) {
-      var net = lost[t] - (gained[t] || 0);
-      if (net > 0 && (t === "mobile" || t === "restaurant")) msgs.push("You lose " + L.dur(net) + " of " + C.blockTypes[t].label.toLowerCase() + " time today.");
-    });
     plan.notes.forEach(function (n) { msgs.push(n); });
-    msgs.push("You have " + L.dur(est.callingMinutes) + " of calling time today.");
     return msgs;
   }
 
   function callbackCount() { return allItems().filter(function (it) { return it.type === "callback"; }).length; }
   // Minutes of calling time by kind: from blocks on the calendar, or from the plan if not connected.
   // Minutes of calling time by kind, from the calling blocks on the rep's calendar.
-  function capacity() {
+  function capacity(cur) {
     var cap = { mobile: 0, restaurant: 0, flex: 0 };
+    // Calling blocks are marked "free," so demos can be booked on top of them.
+    // Time taken by meetings (and demo prep and wrap-up) doesn't count as calling time.
+    var fixedSlots = cur ? cur.plan.slots.filter(function (s) { return s.fixed; }) : [];
     ((state.cal.blocks || {})[state.day] || []).forEach(function (b) {
       var k = b.kind || "flex"; if (k === "other") return;
-      cap[k] += Math.max(0, b.end - b.start);
+      var mins = Math.max(0, b.end - b.start);
+      fixedSlots.forEach(function (s) { mins -= Math.max(0, Math.min(b.end, s.end) - Math.max(b.start, s.start)); });
+      cap[k] += Math.max(0, mins);
     });
     return { cap: cap, source: "calendar" };
   }
@@ -1200,7 +1288,7 @@
     cf.appendChild(el("div", { class: "auto", text: String(cbs) }));
     cf.appendChild(el("p", { class: "hint", text: "From your calendar" }));
 
-    var c = capacity();
+    var c = capacity(cur);
     var chk = L.taskCheck({ mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: cbs, cap: c.cap });
     var bookedMin = c.cap.mobile + c.cap.restaurant + c.cap.flex;
     var coldUsed = chk.dials - cbs;
@@ -1293,6 +1381,7 @@
       pct(r.mobileBlock, 1) + ", restaurant line " + pct(r.restaurantBlock, 1) + ", callback " + pct(r.callback, 1) + ". These already include pickups, reaching the owner and booking, so 100 mobile dials is about " +
       (100 * r.mobileBlock).toFixed(1) + " meetings. Calling time is your calling blocks at " + dph + " dials an hour." }));
     box.appendChild(how);
+    return { chk: chk, cbs: cbs, bookedMin: bookedMin, cap: c.cap, coldPlanned: coldPlanned, coldTasks: coldTasks, onTrack: onTrack, util: util, shortTotal: shortTotal };
   }
 
   function renderToday(cur) {
@@ -1330,6 +1419,7 @@
       if (!calMsg) box.appendChild(el("p", { class: "cal-status", text: "Showing " + n + (n === 1 ? " meeting" : " meetings") + " from your Google Calendar for " + fmtYmd(w[1]) + "\u2013" + fmtYmd(w[5]) + ". Updated " + new Date(state.cal.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "." }));
       actions.appendChild(el("button", { class: "btn", type: "button", text: "Refresh", onclick: function () { if (token) fetchWeek(); else connect(); } }));
       actions.appendChild(el("button", { class: "btn", type: "button", text: "Disconnect", onclick: disconnect }));
+      if (C.dashboardEndpoint) box.appendChild(el("p", { class: "hint", text: "Your daily numbers (call tasks, callbacks, calling time and meeting counts, not meeting titles or who you're meeting) are shared with your manager." }));
     } else {
       if (!calMsg) box.appendChild(el("p", { class: "hint", text: state.cal.connected ? "Reconnect to load this week's meetings and plan your day." : "Your day is planned from your Google Calendar: meetings, demos, callbacks and calling blocks. Connect it to start. Read-only: the site can see your events but can't change them, and they stay in this browser." }));
       actions.appendChild(el("button", { class: "btn btn-primary", type: "button", text: state.cal.connected ? "Reconnect Google Calendar" : "Connect my Google Calendar", onclick: connect }));
@@ -1414,9 +1504,38 @@
     closeMenu();
     var cur = planFor(state.day);
     renderCalendar(cur.plan);
+    renderRGA(cur.plan);
     renderToday(cur);
-    renderTaskCheck(cur);
+    var tc = renderTaskCheck(cur);
     renderCalBox();
+    queueReport(cur, tc);
+  }
+
+  // ---------- Manager dashboard: share today's numbers (no meeting titles) ----------
+  var reportTimer = null;
+  function queueReport(cur, tc) {
+    if (!C.dashboardEndpoint || !token || !tc) return;
+    var ymd = dayYmd(state.day);
+    if (ymd < L.tzParts(new Date()).ymd) return;            // only today and later
+    var items = allItems(), rga = L.rgaSummary(cur.plan), dd = dayData();
+    var day = {
+      date: ymd,
+      mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: tc.cbs,
+      coldPlanned: tc.coldPlanned, goalCold: C.goalColdDials, goalCallbacks: C.goalCallbacks, onTrack: tc.onTrack,
+      bookedMinutes: tc.bookedMin, mobileMinutes: Math.round(tc.cap.mobile), restaurantMinutes: Math.round(tc.cap.restaurant), flexMinutes: Math.round(tc.cap.flex),
+      utilization: tc.util, expectedMeetings: Math.round(tc.chk.expected * 100) / 100,
+      rgaMinutes: rga.rga, nonRgaMinutes: rga.non,
+      demos: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Demo"; }).length,
+      followUps: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Follow-up"; }).length,
+      internalMeetings: items.filter(function (it) { return it.type === "meeting" && !L.isDemo(it); }).length,
+      ignored: listItems().filter(function (it) { return it.ignored; }).length,
+      shortTasks: tc.shortTotal, idleMinutes: tc.chk.idleMinutes
+    };
+    clearTimeout(reportTimer);
+    reportTimer = setTimeout(function () {
+      fetch(C.dashboardEndpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "report", token: token, day: day }) })
+        .catch(function () { /* the dashboard is best-effort; the rep's page keeps working */ });
+    }, 1500);
   }
 
   function initDay() {
@@ -1435,15 +1554,18 @@
   // TABS + INIT
   // =====================================================================
   function showTab() {
-    var day = location.hash === "#my-day";
+    var day = !C.showHowItWorks || location.hash === "#my-day";
+    $("tabs").hidden = !C.showHowItWorks;
     $("panel-how").hidden = day; $("panel-day").hidden = !day;
     $("tab-how").setAttribute("aria-current", day ? "false" : "page");
     $("tab-day").setAttribute("aria-current", day ? "page" : "false");
   }
   window.addEventListener("hashchange", function () { showTab(); window.scrollTo(0, 0); });
 
-  renderAutoBox(); renderFlow(); renderCheat(); renderRejectTable(); renderCallbacks();
-  new Wizard($("sim"), SIM, "start");
+  if (C.showHowItWorks) {
+    renderAutoBox(); renderFlow(); renderCheat(); renderRejectTable(); renderCallbacks();
+    new Wizard($("sim"), SIM, "start");
+  }
   initDay();
   showTab();
 })();
