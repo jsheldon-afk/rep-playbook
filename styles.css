@@ -249,6 +249,8 @@ input[type="number"], input[type="time"], input[type="text"], select, .row { dis
 .cal-block .b-why { color: var(--ink-soft); margin-top: 2px; }
 .cal-add { float: right; font-size: 0.78rem; font-weight: 600; margin-left: 8px; color: var(--blue); text-decoration: none; white-space: nowrap; }
 .cal-add:hover { text-decoration: underline; }
+button.cal-add { background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; }
+button.cal-add:disabled { color: var(--ink-soft); cursor: default; text-decoration: none; }
 .cal-add.on { color: var(--green); }
 .changes .cal-add { float: none; font-size: 0.85rem; }
 .t-prep { background: var(--lav-bg); border-color: #8c7fa3; }

@@ -479,7 +479,16 @@
     return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo, link: ev.htmlLink || null } };
   };
 
-  // Google Calendar "add event" link. ymd = YYYY-MM-DD, start/end = minutes in the rep's time zone.
+  // A calling block as a Google Calendar event, created by the site (Calendar API events.insert).
+  // Always "Show as: Free" (transparent), so demos can still be booked on top of it.
+  // ymd = YYYY-MM-DD, start/end = minutes in the rep's time zone.
+  L.blockEvent = function (o) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    function t(min) { return { dateTime: o.ymd + "T" + p(Math.floor(min / 60)) + ":" + p(min % 60) + ":00", timeZone: C.repTimeZone }; }
+    return { summary: o.title, description: o.details || "", start: t(o.start), end: t(o.end), transparency: "transparent" };
+  };
+
+  // Google Calendar "add event" link (callback plan only). ymd = YYYY-MM-DD, start/end = minutes in the rep's time zone.
   L.gcalLink = function (o) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
     function f(min) { return o.ymd.replace(/-/g, "") + "T" + p(Math.floor(min / 60)) + p(min % 60) + "00"; }
@@ -487,7 +496,6 @@
       "&text=" + encodeURIComponent(o.title) +
       "&dates=" + f(o.start) + "/" + f(o.end) +
       "&details=" + encodeURIComponent(o.details || "") +
-      (o.free ? "&trp=false" : "") +
       "&ctz=" + encodeURIComponent(C.repTimeZone);
   };
   L.ymdLocal = function (d) {
@@ -1099,11 +1107,13 @@
   function blockLinkEl(b) {
     var bt = C.blockTypes[b.type];
     if (blockOnCal(b)) return el("span", { class: "cal-add on", text: "\u2713 On calendar" });
-    return addLink("+ Calendar", L.gcalLink({
-      ymd: state.date, start: b.start, end: b.end, free: true,
+    var ev = L.blockEvent({
+      ymd: state.date, start: b.start, end: b.end,
       title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
       details: [L.whoLine(b), bt.why, "", C.calendarBlockTag].join("\n")
-    }), "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar");
+    });
+    return el("button", { class: "cal-add", type: "button", text: "+ Calendar", "aria-label": "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar",
+      onclick: function () { addBlock(ev, { date: state.date, start: b.start, end: b.end }, this); } });
   }
   function setIgnored(it, on) {
     var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
@@ -1340,7 +1350,7 @@
         list = el("ul", { class: "add-list" });
         cands.forEach(function (b) { list.appendChild(el("li", null, [C.blockTypes[b.type].label + ", " + L.fmtRange(b.start, b.end), blockLinkEl(b)])); });
       }
-      add("Book about " + L.dur(needMin) + " more calling time" + (bookedMin ? "" : " (you have none yet)") + ". Add blocks, then click Refresh.", list);
+      add("Book about " + L.dur(needMin) + " more calling time" + (bookedMin ? "" : " (you have none yet)") + ". Add these blocks:", list);
     }
     if (cbs < gB) add((gB - cbs) + " more " + (gB - cbs === 1 ? "callback" : "callbacks") + " to reach " + gB + ". Set a Nooks reminder for every \u201ccall me back.\u201d");
     if (!steps.children.length && chk.idleMinutes >= 15) {
@@ -1410,7 +1420,7 @@
     sc.onerror = function () { calStatus("Couldn't reach Google. Check your internet connection and try again.", true); };
     document.head.appendChild(sc);
   }
-  function connect() {
+  function connect(then) {
     if (location.protocol === "file:") { calStatus("Google sign-in only works from the site's web address, not a file on your computer.", true); return; }
     calStatus("Opening Google sign-in\u2026");
     loadGis(function () {
@@ -1419,7 +1429,8 @@
           client_id: C.googleClientId, scope: C.calendarScope,
           callback: function (resp) {
             if (resp.error) { calStatus("Google didn't give access: " + resp.error + ".", true); return; }
-            token = resp.access_token; state.cal.connected = true; save(); fetchDays();
+            token = resp.access_token; state.cal.connected = true; save();
+            if (typeof then === "function") then(); else fetchDays();
           },
           error_callback: function (e) {
             calStatus(e && e.type === "popup_closed" ? "Sign-in was closed before it finished. Try again." :
@@ -1456,6 +1467,26 @@
       state.cal = { connected: true, range: days, items: items, allDay: allDay, blocks: blocks, hidden: keepHidden, fetchedAt: Date.now() };
       save(); calMsg = null; renderDay();
     }).catch(function (err) { calStatus(err.message || "Couldn't load your calendar.", true); });
+  }
+  // Adds a calling block to the rep's calendar as Free, then reloads the calendar so it shows "On calendar".
+  function addBlock(ev, block, btn, retried) {
+    if (!token) { connect(function () { addBlock(ev, block, btn, true); }); return; }
+    if (btn) { btn.disabled = true; btn.textContent = "Adding\u2026"; }
+    fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(ev)
+    }).then(function (r) {
+      if (r.status === 401 && !retried) { token = null; return "retry"; }
+      if (r.status === 401 || r.status === 403) throw new Error("Google didn't let the site add the block. Click Disconnect, then connect again and allow calendar access.");
+      if (!r.ok) throw new Error("Google Calendar didn't add the block (" + r.status + "). Try again in a minute.");
+      return r.json();
+    }).then(function (res) {
+      if (res === "retry") { connect(function () { addBlock(ev, block, btn, true); }); return; }
+      state.cal.blocks = state.cal.blocks || {};
+      (state.cal.blocks[block.date] = state.cal.blocks[block.date] || []).push(block); save(); calMsg = null; renderDay(); fetchDays();
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.textContent = "+ Calendar"; }
+      calStatus(err.message || "Couldn't add the block.", true);
+    });
   }
   function disconnect() {
     try { if (token && window.google) window.google.accounts.oauth2.revoke(token, function () {}); } catch (e) { /* ignore */ }

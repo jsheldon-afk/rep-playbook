@@ -37,8 +37,9 @@ window.CONFIG = {
   // ---------- Google Calendar ----------
   // Paste the OAuth client ID from Google Cloud here (see README). Leave "" to hide the feature.
   googleClientId: "660445438110-v7njmd3pkaooh5ighga54gkn7ie64c4o.apps.googleusercontent.com",
+  // calendar.events: read events and add calling blocks (as Free) when a rep clicks + Calendar.
   // "email" lets the manager dashboard confirm who sent each day's numbers.
-  calendarScope: "https://www.googleapis.com/auth/calendar.events.readonly email",
+  calendarScope: "https://www.googleapis.com/auth/calendar.events email",
   // Web app URL of the Apps Script that stores daily numbers for the manager dashboard (see README).
   // Leave "" to keep everything in each rep's browser.
   dashboardEndpoint: "",
@@ -239,7 +240,7 @@ window.CONFIG = {
     prep: { label: "Day organization prep", dials: false, rga: false,
       why: "Get set up before your first dial.",
       doThis: ["Set up your calendar: book today's calling blocks and check your meetings.", "Make sure your pipeline in Salesforce is clean and up to date.", "Check you have enough leads for today (120 cold calls).", "Clear or plan any outstanding tasks in Salesloft."],
-      tips: ["Add any missing calling blocks from this page with + Calendar, then click Refresh.", "Look at today's callbacks so you know who to expect."] },
+      tips: ["Add any missing calling blocks from this page with + Calendar.", "Look at today's callbacks so you know who to expect."] },
     practice: { label: "Cold call bot practice", dials: false, rga: false,
       why: "30 minutes with the Nooks practice bots. Warm up before your first real dial.",
       doThis: ["Run practice calls with the Nooks cold calling bots for 30 minutes."],

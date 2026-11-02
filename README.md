@@ -16,7 +16,7 @@ Plain HTML, CSS and JavaScript. No build step and no internet needed.
 Inputs on **My day** are saved in your browser only.
 
 ## Connect Google Calendar (one-time setup)
-Reps can click **Connect my Google Calendar** on the My day tab to pull in the week's meetings. It's read-only, and events go straight from Google to the rep's browser; nothing is stored anywhere else. The My day tab requires the calendar connection: until a rep connects, it only shows the Connect button.
+Reps can click **Connect my Google Calendar** on the My day tab to pull in the week's meetings. Events go straight from Google to the rep's browser; nothing is stored anywhere else. The site can add calling blocks to the rep's calendar (only when they click + Calendar, always as Free) and never changes or deletes other events. The My day tab requires the calendar connection: until a rep connects, it only shows the Connect button.
 
 Google renames its console menus from time to time; if a label below doesn't match exactly, look for the closest one.
 
@@ -25,7 +25,7 @@ Google renames its console menus from time to time; if a label below doesn't mat
 3. Open the **OAuth consent screen** (also called **Google Auth Platform**):
    - Audience / user type: **Internal** (only Seated accounts can sign in, and Google doesn't need to review the app).
    - App name: Rep Playbook. Support email: yours.
-   - Data access / scopes: add `https://www.googleapis.com/auth/calendar.events.readonly`.
+   - Data access / scopes: add `https://www.googleapis.com/auth/calendar.events` (read events and add calling blocks).
 4. Open **Credentials → Create credentials → OAuth client ID**:
    - Application type: **Web application**.
    - Authorized JavaScript origins: your GitHub Pages address (for example `https://your-username.github.io`), plus `http://localhost:8000` for testing on your computer. No redirect URIs are needed.
@@ -84,7 +84,7 @@ Calling time a rep blocks on their own calendar ("Call block", "Power hour", "Di
 Change the callback words in `callbackRules` in `config.js`.
 
 ## The daily goal and plan
-Every block is tagged RGA (revenue generating: calling, rebooks, demos and follow-ups with prospects) or non-RGA (prep, practice, internal meetings, lead cleaning, lunch, breaks, demo prep and wrap-up), and the page shows the split for the day. Demos and follow-ups get 10 minutes of prep before and a 10-minute wrap-up after (log it in Salesforce, send the follow-up email). Clicking a block shows what to do and tips; edit those in `blockTypes` and `meetingGuides` in `config.js`. Calling blocks added with + Calendar are marked "free" so prospects can still be booked over them.
+Every block is tagged RGA (revenue generating: calling, rebooks, demos and follow-ups with prospects) or non-RGA (prep, practice, internal meetings, lead cleaning, lunch, breaks, demo prep and wrap-up), and the page shows the split for the day. Demos and follow-ups get 10 minutes of prep before and a 10-minute wrap-up after (log it in Salesforce, send the follow-up email). Clicking a block shows what to do and tips; edit those in `blockTypes` and `meetingGuides` in `config.js`. Clicking + Calendar adds the calling block to the rep's calendar directly, marked "free" so prospects can still be booked over it.
 
 The goal is "120 and 10": 120 cold dials and 10 callbacks a day (`goalColdDials`, `goalCallbacks` in `config.js`). The My day tab shows whether each rep's tasks, calendar and callbacks get them there.
 
