@@ -91,6 +91,9 @@
       return "rebooks";
     }
     function lostSlots(type) { return slots.filter(function (s) { return s.base === type && s.fixed; }).length; }
+    // A lunch on the rep's own calendar replaces the plan's lunch: the plan's lunch time becomes calling time.
+    var ownLunch = items.some(function (it) { return it.type === "meeting" && it.lunch; });
+    if (ownLunch) slots.forEach(function (s) { if (s.base === "lunch" && !s.fixed) s.type = bestDial(s); });
 
     // Ensure `need` slots of `type` inside [w0,w1). Prefers one consecutive run.
     function ensure(type, need, w0, w1, donors, eligible) {
@@ -134,14 +137,14 @@
       var ok2 = ensure("sweep", cbNeed, L.toMin(R.afternoonSweepWindow[0]), L.toMin(R.afternoonSweepWindow[1]), ["mobile", "restaurant", "prime"]);
       if (!ok2) notes.push("No room for the afternoon callback sweep. Fit today's callbacks in wherever you can.");
     }
-    if (lostSlots("lunch")) {
+    if (lostSlots("lunch") && !ownLunch) {
       var ok3 = ensure("lunch", lunchNeed, L.toMin(R.lunchWindow[0]), L.toMin(R.lunchWindow[1]), ["mobile", "restaurant"]);
       if (!ok3) notes.push("There's no free " + R.lunchMinutes + " minutes for lunch between 11:30 and 2:00. Eat when you can.");
     }
     // Breaks: each covered break moves to the nearest free calling slot in the afternoon.
     var bw0 = L.toMin(R.breakWindow[0]), bw1 = L.toMin(R.breakWindow[1]), lostBreaks = 0;
     slots.forEach(function (s) {
-      if (s.base !== "break" || !s.fixed) return;
+      if (s.base !== "break" || !s.fixed || (s.fixed.item && s.fixed.item.lunch)) return;   // lunch covers this break
       var cand = slots.filter(function (x) {
         return free(x) && (x.type === "mobile" || x.type === "restaurant" || x.type === "prime") && x.start >= bw0 && x.start < bw1 &&
           !slots.some(function (y) { return y.type === "break" && Math.abs(y.start - x.start) < 60; });   // keep breaks an hour apart
@@ -188,38 +191,6 @@
     return { slots: slots, notes: notes, fixedList: fixedList, callbacks: callbacks, template: template };
   };
 
-  // Revenue generating activity: talking to prospects. Calling blocks, demos and follow-ups.
-  L.isRGA = function (slot) {
-    if (slot.fixed) return slot.fixed.kind === "meeting" && !!slot.fixed.item && L.isDemo(slot.fixed.item);
-    var bt = C.blockTypes[slot.type];
-    return !!(bt && bt.rga);
-  };
-  L.rgaSummary = function (plan) {
-    var rga = 0, non = 0;
-    plan.slots.forEach(function (s) { if (L.isRGA(s)) rga += C.slotMinutes; else non += C.slotMinutes; });
-    return { rga: rga, non: non, share: rga / Math.max(1, rga + non) };
-  };
-
-  // RGA from what's actually on the calendar right now: calling blocks the rep has booked
-  // (minus meetings inside them) plus demos and follow-ups. calBlocks: [{start,end,kind}], items: counted events.
-  L.currentRGA = function (calBlocks, items) {
-    var d0 = L.toMin(C.dayStart), d1 = L.toMin(C.dayEnd), n = d1 - d0;
-    var rga = new Array(n), busy = new Array(n);
-    function mark(arr, a, b, v) { for (var t = Math.max(a, d0); t < Math.min(b, d1); t++) arr[t - d0] = v; }
-    (items || []).forEach(function (it) {
-      if (it.type !== "meeting") return;
-      mark(busy, it.start, it.end, true);
-      if (L.isDemo(it)) mark(rga, it.start, it.end, true);
-    });
-    (calBlocks || []).forEach(function (b) {
-      if (b.kind === "other") return;
-      for (var t = Math.max(b.start, d0); t < Math.min(b.end, d1); t++) if (!busy[t - d0]) rga[t - d0] = true;
-    });
-    var m = 0; for (var i = 0; i < n; i++) if (rga[i]) m++;
-    return { rga: m, total: n, share: m / n };
-  };
-
-  // Group slots into calendar blocks.
   // Revenue generating activity: talking to prospects. Calling blocks, demos and follow-ups.
   L.isRGA = function (slot) {
     if (slot.fixed) return slot.fixed.kind === "meeting" && !!slot.fixed.item && L.isDemo(slot.fixed.item);
@@ -473,10 +444,12 @@
     if (end <= a.min) return { skip: "zero-length" };
     var label = ev.summary || (ev.eventType === "outOfOffice" ? "Out of office" : "Busy");
     var type = L.isCallbackEvent(ev, label) ? "callback" : "meeting";
-    // Events marked "free" don't block time, except callbacks (Nooks marks its reminders free).
-    if (ev.transparency === "transparent" && type !== "callback") return { skip: "free" };
+    // The rep's own lunch: no outside guests and a lunch word in the title.
+    var lunch = type === "meeting" && !L.externalGuests(ev).length && L.hasWord(label, C.lunchWords);
+    // Events marked "free" don't block time, except callbacks (Nooks marks its reminders free) and lunch.
+    if (ev.transparency === "transparent" && type !== "callback" && !lunch) return { skip: "free" };
     var demo = type === "meeting" && L.externalGuests(ev).length > 0 && !L.hasWord(label, C.skipWords);
-    return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo, link: ev.htmlLink || null } };
+    return { item: { id: ev.id, date: a.ymd, start: a.min, end: type === "callback" ? a.min + 15 : end, label: label, type: type, source: "calendar", demo: demo, lunch: lunch, link: ev.htmlLink || null } };
   };
 
   // A calling block as a Google Calendar event, created by the site (Calendar API events.insert).
@@ -1216,7 +1189,8 @@
     var list = el("ol", { class: "cal-list", "aria-label": "Your plan, " + C.repTimezoneLabel });
     L.blocks(plan).forEach(function (b) {
       var h = px(b.end) - px(b.start), rga = isRgaBlock(b);
-      var li = el("li", { class: "cal-block t-" + (b.type === "fixed" ? (b.fixed.kind === "meeting" ? (rga ? "demo" : "fixed") : "admin") : b.type),
+      var isLunch = b.type === "fixed" && !!b.fixed.item && !!b.fixed.item.lunch;
+      var li = el("li", { class: "cal-block t-" + (b.type === "fixed" ? (isLunch ? "lunch" : b.fixed.kind === "meeting" ? (rga ? "demo" : "fixed") : "admin") : b.type),
         style: "top:" + (px(b.start) + 1) + "px;height:" + (h - 2) + "px" });
       if (b.type === "fixed") {
         var f = b.fixed, title;
@@ -1225,11 +1199,12 @@
           title = (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
         } else title = f.label;
         var conflict = f.kind === "meeting" && !rga && f.start < p1 && f.end > p0;
-        li.appendChild(el("div", { class: "b-title" }, [conflict ? el("span", { class: "chip warn", text: "Prime time" }) : null, el("span", { text: title }), el("span", { class: "b-time", text: L.fmtRange(f.start, f.end) })]));
+        li.appendChild(el("div", { class: "b-title" }, [isLunch ? el("span", { class: "cal-add on", text: "\u2713 On calendar" }) : null, conflict ? el("span", { class: "chip warn", text: "Prime time" }) : null, el("span", { text: title }), el("span", { class: "b-time", text: L.fmtRange(f.start, f.end) })]));
         if (f.kind === "prep" || f.kind === "post") {
           makeClickable(li, title + ". Show what to do", function () { showInfo(li, { title: title, when: L.fmtRange(f.start, f.end), guide: C.meetingGuides[f.kind], rga: false }); });
         } else if (f.item) {
-          var note = conflict ? "This sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM." : null;
+          var note = !conflict ? null : isLunch ? "Your lunch sits in restaurant prime time. If you can, take it between " + L.fmt(L.toMin(C.reflow.lunchWindow[0])) + " and " + L.fmt(L.toMin(C.reflow.lunchWindow[1])) + "." :
+            "This sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM.";
           makeClickable(li, title + ". Change how it's treated", function () { showMenu(li, f.item, note); });
         }
       } else {
@@ -1526,7 +1501,7 @@
       rgaMinutes: rgaNow.rga, nonRgaMinutes: rgaNow.total - rgaNow.rga, rgaPlanMinutes: rgaOpt.rga,
       demos: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Demo"; }).length,
       followUps: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Follow-up"; }).length,
-      internalMeetings: items.filter(function (it) { return it.type === "meeting" && !L.isDemo(it); }).length,
+      internalMeetings: items.filter(function (it) { return it.type === "meeting" && !L.isDemo(it) && !it.lunch; }).length,
       ignored: listItems().filter(function (it) { return it.ignored; }).length,
       shortTasks: tc.shortTotal, idleMinutes: tc.chk.idleMinutes
     };

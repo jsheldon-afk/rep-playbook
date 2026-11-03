@@ -52,6 +52,10 @@ window.CONFIG = {
   // Treated like the site's own calling blocks: not a meeting and not a callback. Ignored if outside guests are invited.
   callBlockWords: ["block", "blitz", "calls", "power hour", "dial", "dials", "dialing", "prospecting", "cold call", "calling"],
 
+  // A rep's own lunch on their calendar (no outside guests, one of these words in the title).
+  // It replaces the plan's lunch, so the site doesn't add a second one. Counted even when marked Free.
+  lunchWords: ["lunch"],
+
   // How calendar events are recognized as callbacks (they block 15 minutes and count as callback dials).
   callbackRules: {
     reminderText: ["REMINDER - "],          // Nooks callback reminders: always a callback
