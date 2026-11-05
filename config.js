@@ -42,7 +42,7 @@ window.CONFIG = {
   calendarScope: "https://www.googleapis.com/auth/calendar.events email",
   // Web app URL of the Apps Script that stores submitted gameplans for the manager dashboard (see README).
   // Leave "" to hide the Submit Gameplan button and keep everything in each rep's browser.
-  dashboardEndpoint: "",
+  dashboardEndpoint: "https://script.google.com/macros/s/AKfycbwouxPYmCvJoJs7EX8o_GLf0ubZHeNEmjAksvxtF2AXC3iAzNsNvaoEAFlmqDQfE2w/exec",
   // The Submit Gameplan button at the bottom of the plan. {time} = when they submitted.
   submitText: {
     button: "Submit Gameplan!",
