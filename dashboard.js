@@ -1,4 +1,4 @@
-/* Rep Playbook manager dashboard. Reads the daily numbers reps' pages send to the Apps Script. */
+/* Rep Playbook manager dashboard. Reads the gameplans reps submit to the Apps Script. */
 (function () {
   "use strict";
   var C = window.CONFIG, token = null, data = null, selected = null;
@@ -23,6 +23,15 @@
     return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   }
   function num(v) { return Number(v) || 0; }
+  function hm(min) {
+    var h = Math.floor(min / 60), m = min % 60, h12 = ((h + 11) % 12) + 1;
+    return h12 + ":" + (m < 10 ? "0" : "") + m;
+  }
+  function plan(r) {
+    try { var p = typeof r.plan === "string" ? JSON.parse(r.plan || "{}") : (r.plan || {}); return { blocks: p.blocks || [], callbacks: p.callbacks || [] }; }
+    catch (e) { return { blocks: [], callbacks: [] }; }
+  }
+  function toMin(hhmm) { var p = String(hhmm).split(":"); return Number(p[0]) * 60 + Number(p[1]); }
 
   function auth(msg, isErr) {
     var box = $("d-auth"); box.innerHTML = "";
@@ -87,7 +96,7 @@
     // day table
     $("d-day-title").textContent = selected === data.today ? "Today" : fmtDate(selected);
     var t = $("d-day"); t.innerHTML = "";
-    var head = ["Rep", "Status", "Cold set up", "Callbacks", "Calling time booked", "Using", "RGA now (with plan)", "Expected meetings", "Demos / F-ups", "Tasks (mobile / rest.)", "Issue", "Updated"];
+    var head = ["Rep", "Status", "Cold set up", "Callbacks", "Calling time booked", "Using", "RGA now (with plan)", "Expected meetings", "Demos / F-ups", "Tasks (mobile / rest.)", "Issue", "Submitted"];
     t.appendChild(el("thead", null, [el("tr", null, head.map(function (h, i) { return el("th", { class: i > 1 && i < 10 ? "num" : null, text: h }); }))]));
     var tb = el("tbody");
     day.forEach(function (r) {
@@ -110,18 +119,19 @@
         el("td", { class: "hint", text: upd })
       ]));
     });
-    if (!day.length) tb.appendChild(el("tr", null, [el("td", { colspan: String(head.length), class: "hint", text: "No reps have opened their plan for this day yet." })]));
+    if (!day.length) tb.appendChild(el("tr", null, [el("td", { colspan: String(head.length), class: "hint", text: "No reps have submitted a gameplan for this day yet." })]));
     t.appendChild(tb);
 
     var reported = day.map(function (r) { return r.email; });
     var missing = Object.keys(data.roster || {}).filter(function (e) { return reported.indexOf(e) < 0; });
-    $("d-missing").textContent = missing.length ? "Haven't opened their plan " + (selected === data.today ? "today" : "this day") + ": " + missing.map(function (e) { return data.roster[e] || e.split("@")[0]; }).join(", ") + "." : "";
+    renderPlans(day, onTrack);
+    $("d-missing").textContent = missing.length ? "Haven't submitted " + (selected === data.today ? "today" : "this day") + ": " + missing.map(function (e) { return data.roster[e] || e.split("@")[0]; }).join(", ") + "." : "";
 
     // two-week averages
     var by = {};
     rows.forEach(function (r) { (by[r.email] = by[r.email] || []).push(r); });
     var w = $("d-week"); w.innerHTML = "";
-    var wh = ["Rep", "Days used", "Days on track", "Avg cold set up", "Avg callbacks", "Avg calling time", "Avg RGA now", "Avg expected meetings"];
+    var wh = ["Rep", "Days submitted", "Days on track", "Avg cold set up", "Avg callbacks", "Avg calling time", "Avg RGA now", "Avg expected meetings"];
     w.appendChild(el("thead", null, [el("tr", null, wh.map(function (h, i) { return el("th", { class: i ? "num" : null, text: h }); }))]));
     var wb = el("tbody");
     Object.keys(by).map(function (e) {
@@ -135,6 +145,37 @@
     });
     if (!Object.keys(by).length) wb.appendChild(el("tr", null, [el("td", { colspan: String(wh.length), class: "hint", text: "No data yet." })]));
     w.appendChild(wb);
+  }
+
+  // Everyone's gameplan side by side: one column per rep, same colors as the rep page.
+  function renderPlans(day, onTrack) {
+    var box = $("d-plans"); box.innerHTML = "";
+    var d0 = toMin(C.dayStart), d1 = toMin(C.dayEnd), px = 80 / 60;   // 80px an hour
+    var height = (d1 - d0) * px, y = function (min) { return (Math.max(d0, Math.min(d1, min)) - d0) * px; };
+    var hours = el("div", { class: "gp-hours", "aria-hidden": "true" }, [el("div", { class: "gp-head" })]);
+    var hb = el("div", { class: "gp-body", style: "height:" + height + "px" });
+    for (var t = d0; t <= d1; t += 60) hb.appendChild(el("div", { style: "top:" + y(t) + "px", text: hm(t).replace(":00", "") }));
+    hours.appendChild(hb); box.appendChild(hours);
+    if (!day.length) { box.appendChild(el("div", { class: "gp-col" }, [el("div", { class: "gp-head hint", text: "No gameplans submitted for this day yet." })])); return; }
+    day.forEach(function (r) {
+      var p = plan(r), ok = onTrack(r);
+      var col = el("div", { class: "gp-col", role: "group", "aria-label": r.name + "'s gameplan" });
+      col.appendChild(el("div", { class: "gp-head" }, [el("strong", { text: r.name }),
+        el("span", { class: ok ? "ok" : "bad", text: ok ? "On track" : "Behind" }), " \u00b7 " + p.callbacks.length + " callback" + (p.callbacks.length === 1 ? "" : "s")]));
+      var body = el("div", { class: "gp-body", style: "height:" + height + "px" });
+      p.blocks.forEach(function (b) {
+        if (b.e <= d0 || b.s >= d1) return;
+        var h = y(b.e) - y(b.s), when = hm(b.s) + "\u2013" + hm(b.e);
+        var tip = b.l + ", " + when + " ET" + (b.cal === true ? " \u00b7 on their calendar" : b.cal === false ? " \u00b7 not on their calendar yet" : "") + (b.rga ? " \u00b7 RGA" : "");
+        body.appendChild(el("div", { class: "gp-b t-" + b.k, title: tip, style: "top:" + (y(b.s) + 1) + "px;height:" + Math.max(h - 2, 4) + "px" },
+          h >= 14 ? [(b.cal ? "\u2713 " : "") + b.l, h >= 26 ? el("span", { text: when }) : null] : []));
+      });
+      p.callbacks.forEach(function (m) {
+        if (m < d0 || m >= d1) return;
+        body.appendChild(el("div", { class: "gp-cb", title: "Callback " + hm(m) + " ET", style: "top:" + (y(m) + 2) + "px" }));
+      });
+      col.appendChild(body); box.appendChild(col);
+    });
   }
 
   auth();

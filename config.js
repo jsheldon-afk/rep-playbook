@@ -40,9 +40,18 @@ window.CONFIG = {
   // calendar.events: read events and add calling blocks (as Free) when a rep clicks + Calendar.
   // "email" lets the manager dashboard confirm who sent each day's numbers.
   calendarScope: "https://www.googleapis.com/auth/calendar.events email",
-  // Web app URL of the Apps Script that stores daily numbers for the manager dashboard (see README).
-  // Leave "" to keep everything in each rep's browser.
+  // Web app URL of the Apps Script that stores submitted gameplans for the manager dashboard (see README).
+  // Leave "" to hide the Submit Gameplan button and keep everything in each rep's browser.
   dashboardEndpoint: "",
+  // The Submit Gameplan button at the bottom of the plan. {time} = when they submitted.
+  submitText: {
+    button: "Submit Gameplan!",
+    share: "Submitting shares this plan with your manager: your blocks, times and daily numbers. Meeting titles, callback names and who you're meeting are not shared.",
+    sending: "Submitting\u2026",
+    done: "\u2713 Submitted at {time}. Your manager can see this plan.",
+    changed: "Your plan changed since you submitted at {time}. Submit again so your manager sees the new one.",
+    failed: "Couldn't submit. Try again in a minute."
+  },
   repTimeZone: "America/New_York",
   // Calling blocks added from the site carry this tag in their notes, so the site
   // recognizes them when it reads the calendar and doesn't treat them as meetings.

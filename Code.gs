@@ -1,5 +1,5 @@
 /**
- * Rep Playbook: stores each rep's daily numbers for the manager dashboard.
+ * Rep Playbook: stores each rep's submitted gameplan for the manager dashboard.
  *
  * Setup (once, by the sheet owner):
  *   1. Create a blank Google Sheet called "Rep Playbook Data".
@@ -16,8 +16,10 @@
  *       sender's Google sign-in, so only Seated accounts can write, and only managers can read.)
  *   5. Copy the Web app URL into dashboardEndpoint in config.js.
  *
- * What's stored: one row per rep per day with counts and minutes. No meeting titles,
- * no prospect names, no calendar details.
+ * What's stored: one row per rep per day, saved when the rep clicks "Submit Gameplan!" (submitting
+ * again replaces it). Counts and minutes, plus the plan's blocks: start, end and block type
+ * (Mobile block, Demo, Meeting, Lunch...) and callback times. No meeting titles, no prospect names,
+ * no guests.
  */
 
 const DOMAIN = 'seatedapp.io';
@@ -26,7 +28,7 @@ const DAILY = 'Daily';
 const COLS = ['key', 'date', 'email', 'updated', 'mobileTasks', 'restaurantTasks', 'callbacks', 'coldPlanned',
   'goalCold', 'goalCallbacks', 'onTrack', 'bookedMinutes', 'mobileMinutes', 'restaurantMinutes', 'flexMinutes',
   'utilization', 'expectedMeetings', 'rgaMinutes', 'nonRgaMinutes', 'demos', 'followUps', 'internalMeetings',
-  'ignored', 'shortTasks', 'idleMinutes', 'rgaPlanMinutes'];
+  'ignored', 'shortTasks', 'idleMinutes', 'rgaPlanMinutes', 'plan'];
 
 function setup() {
   const ss = SpreadsheetApp.getActive();
@@ -49,8 +51,8 @@ function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
     const email = whoIs_(body.token);
-    if (!email) return out_({ ok: false, error: 'Sign in with your Seated Google account.' });
-    if (body.action === 'report') return out_(report_(email, body.day || {}));
+    if (!email) return out_({ ok: false, auth: true, error: 'Sign in with your Seated Google account.' });
+    if (body.action === 'submit') return out_(submit_(email, body.day || {}));
     if (body.action === 'dashboard') return out_(dashboard_(email, Number(body.days) || 14));
     return out_({ ok: false, error: 'Unknown action.' });
   } catch (err) {
@@ -70,7 +72,20 @@ function whoIs_(token) {
   return email.endsWith('@' + DOMAIN) ? email : null;
 }
 
-function report_(email, day) {
+// Keeps only the fields the dashboard draws, so nothing else can be stored in the plan column.
+function cleanPlan_(p) {
+  p = p || {};
+  const n = function (v) { v = Number(v); return isFinite(v) ? Math.max(0, Math.min(1440, Math.round(v))) : 0; };
+  const blocks = (Array.isArray(p.blocks) ? p.blocks : []).slice(0, 80).map(function (b) {
+    const o = { s: n(b.s), e: n(b.e), k: String(b.k || '').replace(/[^a-z]/g, '').slice(0, 12), l: String(b.l || '').slice(0, 50), rga: b.rga === true };
+    if (typeof b.cal === 'boolean') o.cal = b.cal;
+    return o;
+  });
+  const callbacks = (Array.isArray(p.callbacks) ? p.callbacks : []).filter(function (v) { return v !== '' && isFinite(Number(v)); }).slice(0, 60).map(n);
+  return JSON.stringify({ blocks: blocks, callbacks: callbacks });
+}
+
+function submit_(email, day) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day.date || ''))) return { ok: false, error: 'Missing date.' };
   const sh = dailySheet_();
   const key = email + '|' + day.date;
@@ -78,6 +93,7 @@ function report_(email, day) {
     if (c === 'key') return key;
     if (c === 'email') return email;
     if (c === 'updated') return new Date();
+    if (c === 'plan') return cleanPlan_(day.plan);
     const v = day[c];
     return typeof v === 'number' || typeof v === 'boolean' ? v : String(v == null ? '' : v).slice(0, 40);
   });
@@ -129,6 +145,8 @@ function dailySheet_() {
     sh.getRange(1, 1, 1, COLS.length).setValues([COLS]).setFontWeight('bold');
     sh.setFrozenRows(1);
     sh.getRange('B:B').setNumberFormat('@');   // keep dates as plain text
+  } else if (sh.getRange(1, COLS.length).getValue() !== COLS[COLS.length - 1]) {
+    sh.getRange(1, 1, 1, COLS.length).setValues([COLS]).setFontWeight('bold');   // add new columns to an older sheet
   }
   return sh;
 }

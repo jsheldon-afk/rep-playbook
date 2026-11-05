@@ -43,20 +43,20 @@ python3 -m http.server 8000
 Then go to `http://localhost:8000` in your browser. Everything else on the site works fine by double-clicking.
 
 ## Manager dashboard
-`dashboard.html` shows managers what each rep is set up to do: cold dials and callbacks against 120 and 10, calling time booked and how much of it they'll use, RGA share, expected meetings, demos, and who hasn't opened their plan. It also shows two-week averages per rep. It never stores meeting titles or prospect names.
+`dashboard.html` shows managers each rep's submitted gameplan: cold dials and callbacks against 120 and 10, calling time booked and how much of it they'll use, RGA share, expected meetings, demos, and who hasn't submitted. Below the table, every rep's day is drawn side by side (9:00 to 6:00 ET, same colors as the rep page), with a ✓ on blocks that are already on their Google Calendar and dots for callbacks. It also shows two-week averages per rep. It never stores meeting titles, callback names or prospect names: meetings are sent only as "Demo", "Follow-up", "Meeting" or "Lunch", and callbacks only as times.
 
-How it works: each rep's page sends a one-line summary of their day to a small Apps Script attached to a Google Sheet. The script checks the rep's Google sign-in, so only Seated accounts can send numbers and only managers listed in the sheet can read them.
+How it works: when a rep clicks **Submit Gameplan!** at the bottom of their plan, their page sends that day's numbers and blocks to a small Apps Script attached to a Google Sheet. Nothing is sent until they click. Submitting again replaces the earlier one; if the plan changes after they submit, the page tells them to submit again. The script checks the rep's Google sign-in, so only Seated accounts can submit and only managers listed in the sheet can read them.
 
 Setup (about 15 minutes):
 1. In Google Cloud, open **Data access** for the Rep Playbook app and add the scope `.../auth/userinfo.email` (non-sensitive). Reps approve it once the next time they connect.
-2. Create a blank Google Sheet called "Rep Playbook Data". Open **Extensions > Apps Script**, delete the sample code and paste in `apps-script/Code.gs`. Save.
+2. Create a blank Google Sheet called "Rep Playbook Data". Open **Extensions > Apps Script**, delete the sample code and paste in `Code.gs`. Save.
 3. In the function menu at the top, pick **setup** and click **Run**. Approve the permissions. This creates the Managers, Reps and Daily tabs and adds you as a manager.
-4. Add other managers' emails to the **Managers** tab, and every rep's email and name to the **Reps** tab (used for names and for "hasn't opened their plan").
+4. Add other managers' emails to the **Managers** tab, and every rep's email and name to the **Reps** tab (used for names and for "hasn't submitted").
 5. Click **Deploy > New deployment**, choose **Web app**, set **Execute as: Me** and **Who has access: Anyone**, and click **Deploy**. ("Anyone" lets the site reach it; the script itself checks every sign-in.)
 6. Copy the **Web app URL** into `dashboardEndpoint` in `config.js`, and upload `config.js`, `app.js`, `dashboard.html` and `dashboard.js`.
 7. Managers open `https://jsheldon-afk.github.io/rep-playbook/dashboard.html` and sign in.
 
-Tell reps before you turn it on. Their page shows a line saying their daily numbers are shared with their manager.
+Tell reps before you turn it on, and when you expect them to submit (for example, by 10 AM, or before they log off for the next day). Until `dashboardEndpoint` is filled in, the Submit Gameplan! button doesn't show.
 
 If you change `Code.gs` later, use **Deploy > Manage deployments > Edit > New version** so the URL stays the same.
 

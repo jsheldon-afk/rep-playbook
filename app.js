@@ -559,6 +559,34 @@
   };
   function q2(s) { return "\u201c" + s + "\u201d"; }
 
+  // ---------- Gameplan for the manager dashboard ----------
+  // The day as the rep chose it, as blocks: s/e = minutes ET, k = kind (for color), l = label,
+  // rga, cal = a suggested block that's already on their Google Calendar. Meetings are sent only as
+  // "Demo", "Follow-up", "Meeting" or "Lunch", and callbacks only as times: no titles, no names.
+  L.gameplan = function (plan, calBlocks) {
+    var blocks = L.blocks(plan).map(function (b) {
+      var o = { s: b.start, e: b.end };
+      if (b.type === "fixed") {
+        var f = b.fixed, dk = f.item && L.demoKind(f.item);
+        if (f.kind === "prep" || f.kind === "post") { o.k = "admin"; o.l = (f.kind === "prep" ? "Prep" : "Wrap-up"); o.rga = false; }
+        else if (f.item && f.item.lunch) { o.k = "lunch"; o.l = "Lunch"; o.rga = false; }
+        else if (dk) { o.k = "demo"; o.l = dk; o.rga = true; }
+        else { o.k = "fixed"; o.l = "Meeting"; o.rga = false; }
+      } else if (b.skipped) {
+        o.k = "skipped"; o.l = "Skipped: " + C.blockTypes[b.skipped].label; o.rga = false;
+      } else {
+        var bt = C.blockTypes[b.type];
+        o.k = b.type; o.l = bt.label + (b.alt ? " (second best)" : b.moved ? " (moved)" : ""); o.rga = !!bt.rga;
+        if (bt.dials || b.type === "practice" || b.type === "leads") {
+          o.cal = (calBlocks || []).some(function (x) { return x.start <= b.start && x.end >= b.end; });
+        }
+      }
+      return o;
+    });
+    var cbs = (plan.callbacks || []).map(function (it) { return it.start; }).sort(function (a, b) { return a - b; });
+    return { blocks: blocks, callbacks: cbs };
+  };
+
   window.RP = L;
   if (typeof document === "undefined" || !document.getElementById("panel-how")) return;
 
@@ -1068,11 +1096,13 @@
     try { var s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s && s.days) state = s; } catch (e) { /* storage blocked */ }
     if (!state.cal) state.cal = { connected: false };
     if (!state.choices) state.choices = {};
+    if (!state.submitted) state.submitted = {};
     var days = L.planDays(new Date());
     if (days.indexOf(state.date) < 0) state.date = days[0];
     // forget task counts for days that have passed
     Object.keys(state.days).forEach(function (k) { if (k < days[0]) delete state.days[k]; });
     Object.keys(state.choices).forEach(function (k) { if (k < days[0]) delete state.choices[k]; });
+    Object.keys(state.submitted).forEach(function (k) { if (k < days[0]) delete state.submitted[k]; });
   }
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked */ } }
   function dayData(ymd) {
@@ -1539,17 +1569,15 @@
     cur.rga = renderRGA(cur.plan);
     renderNotes(cur);
     renderCalendar(cur.plan);
-    $("share-note").hidden = !C.dashboardEndpoint;
-    queueReport(cur, tc);
+    renderSubmit(cur, tc);
   }
 
-  // ---------- Manager dashboard: share the day's numbers (no meeting titles) ----------
-  var reportTimer = null;
-  function queueReport(cur, tc) {
-    if (!C.dashboardEndpoint || !token || !tc) return;
-    var items = allItems(), dd = dayData();
-    var rgaNow = cur.rga ? cur.rga.now : L.currentRGA((state.cal.blocks || {})[state.date] || [], items), rgaOpt = L.rgaSummary(cur.plan);
-    var day = {
+  // ---------- Submit Gameplan: share the day as planned with the manager dashboard ----------
+  // Sent only when the rep clicks the button. No meeting titles, callback names or guests.
+  function gameplanDay(cur, tc) {
+    var items = allItems(), dd = dayData(), cal = (state.cal.blocks || {})[state.date] || [];
+    var rgaNow = cur.rga ? cur.rga.now : L.currentRGA(cal, items), rgaOpt = L.rgaSummary(cur.plan);
+    return {
       date: state.date,
       mobileTasks: dd.mobileTasks, restaurantTasks: dd.restaurantTasks, callbacks: tc.cbs,
       coldPlanned: tc.coldPlanned, goalCold: C.goalColdDials, goalCallbacks: C.goalCallbacks, onTrack: tc.onTrack,
@@ -1560,19 +1588,46 @@
       followUps: items.filter(function (it) { return it.type === "meeting" && L.demoKind(it) === "Follow-up"; }).length,
       internalMeetings: items.filter(function (it) { return it.type === "meeting" && !L.isDemo(it) && !it.lunch; }).length,
       ignored: listItems().filter(function (it) { return it.ignored; }).length,
-      shortTasks: tc.shortTotal, idleMinutes: tc.chk.idleMinutes
+      shortTasks: tc.shortTotal, idleMinutes: tc.chk.idleMinutes,
+      plan: L.gameplan(cur.plan, cal)
     };
-    clearTimeout(reportTimer);
-    reportTimer = setTimeout(function () {
-      fetch(C.dashboardEndpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "report", token: token, day: day }) })
-        .catch(function () { /* best effort */ });
-    }, 1500);
+  }
+  var submitting = false, submitErr = null, lastDay = null;
+  function clock(ms) { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  function renderSubmit(cur, tc) {
+    var box = $("submit-box"), T = C.submitText;
+    box.hidden = !C.dashboardEndpoint || !tc;
+    if (box.hidden) return;
+    lastDay = gameplanDay(cur, tc);
+    var sub = state.submitted[state.date], same = sub && sub.sig === JSON.stringify(lastDay);
+    var btn = $("submit-plan"), st = $("submit-status");
+    btn.hidden = !!same && !submitting;
+    btn.disabled = submitting;
+    btn.textContent = submitting ? T.sending : T.button;
+    st.className = "hint submit-status" + (submitErr || (sub && !same) ? " warn" : same ? " ok" : "");
+    st.textContent = submitErr || (!sub ? T.share : (same ? T.done : T.changed).replace("{time}", clock(sub.at)));
+  }
+  function submitPlan(retried) {
+    if (!lastDay || submitting) return;
+    if (!token) { connect(function () { submitPlan(true); }); return; }
+    var day = lastDay, sig = JSON.stringify(day);
+    submitting = true; submitErr = null; renderDay();
+    fetch(C.dashboardEndpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "submit", token: token, day: day }) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        submitting = false;
+        if (res && res.ok) { state.submitted[day.date] = { at: Date.now(), sig: sig }; save(); renderDay(); return; }
+        if (res && res.auth && !retried) { token = null; renderDay(); connect(function () { submitPlan(true); }); return; }
+        submitErr = (res && res.error) || C.submitText.failed; renderDay();
+      })
+      .catch(function () { submitting = false; submitErr = C.submitText.failed; renderDay(); });
   }
 
   function initDay() {
     load();
     $("mobile-tasks").addEventListener("input", function () { dayData().mobileTasks = Math.max(0, Number(this.value) || 0); save(); renderDay(); });
     $("restaurant-tasks").addEventListener("input", function () { dayData().restaurantTasks = Math.max(0, Number(this.value) || 0); save(); renderDay(); });
+    $("submit-plan").addEventListener("click", function () { submitPlan(false); });
     $("clear-day").addEventListener("click", function () {
       if (!confirm("Clear the call tasks you entered for " + dayName(state.date).toLowerCase().replace("today", "today") + "?")) return;
       delete state.days[state.date]; save(); renderDay();

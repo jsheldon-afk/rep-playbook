@@ -13,7 +13,7 @@
   </div>
 </header>
 <main class="wrap">
-  <p class="tab-intro">What each rep is set up to do today, from their calendar and call tasks. These are plans, not actual dials.</p>
+  <p class="tab-intro">Each rep's submitted gameplan: what they're set up to do and how their day is laid out. These are plans, not actual dials.</p>
   <div class="panel" id="d-auth"></div>
   <div id="d-main" hidden>
     <div class="day-toggle" id="d-dates" role="group" aria-label="Pick a date"></div>
@@ -24,8 +24,13 @@
       <p class="hint" id="d-missing"></p>
     </section>
     <section class="block">
+      <h2>Gameplans</h2>
+      <p class="lede">Each rep's day as they submitted it, 9:00 AM to 6:00 PM ET. &#10003; = already on their Google Calendar. Green dots = callbacks. Hover a block for its time.</p>
+      <div class="gp-scroll"><div class="gp" id="d-plans"></div></div>
+    </section>
+    <section class="block">
       <h2>Last 2 weeks</h2>
-      <p class="lede">Averages over the days each rep used the page.</p>
+      <p class="lede">Averages over the days each rep submitted a gameplan.</p>
       <div class="table-scroll"><table class="check-table" id="d-week"></table></div>
     </section>
   </div>
