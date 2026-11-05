@@ -52,6 +52,8 @@
   L.buildDay = function (opts) {
     var day = opts.day; // 1 = Mon ... 5 = Fri
     var items = opts.items || [];
+    // The rep's choices for suggested blocks: { alt: { practice: true, ... }, skip: [{ type, start, end }] }
+    var choices = opts.choices || {}, useAlt = choices.alt || {}, alts = {};
     var step = C.slotMinutes, dayStart = L.toMin(C.dayStart), dayEnd = L.toMin(C.dayEnd);
     var template = (day === 4 || day === 5) ? C.thuFriDay : C.defaultDay;
     var slots = [];
@@ -104,17 +106,23 @@
       var center = orig.length ? (orig[0].start + orig[orig.length - 1].end) / 2 : (w0 + w1) / 2;
       have.forEach(function (s) { s.type = bestDial(s); });
       var cand = function (s) { return free(s) && s.start >= w0 && s.start < w1 && donors.indexOf(s.type) >= 0 && (!eligible || eligible(s)); };
-      var best = null;
+      var runs = [];
       for (var i = 0; i + need <= slots.length; i++) {
         var run = slots.slice(i, i + need);
         if (!run.every(cand)) continue;
         var mid = (run[0].start + run[need - 1].end) / 2;
-        var dist = Math.abs(mid - center);
         var rank = run.reduce(function (a, s) { return a + (PRIORITY[s.type] || 0); }, 0);
-        if (!best || dist < best.dist || (dist === best.dist && rank < best.rank)) best = { i: i, dist: dist, rank: rank };
+        runs.push({ i: i, dist: Math.abs(mid - center), rank: rank });
       }
+      runs.sort(function (a, b) { return a.dist - b.dist || a.rank - b.rank || a.i - b.i; });
+      var best = runs[0];
       if (best) {
-        for (var j = best.i; j < best.i + need; j++) { slots[j].type = type; slots[j].moved = true; }
+        // Second best: the nearest other time that doesn't overlap the best one.
+        var second = runs.filter(function (r) { return r.i >= best.i + need || r.i + need <= best.i; })[0] || null;
+        var pick = useAlt[type] && second ? second : best;
+        var span = function (r) { return r ? { start: slots[r.i].start, end: slots[r.i + need - 1].end } : null; };
+        alts[type] = { best: span(best), second: span(second), usingSecond: pick === second };
+        for (var j = pick.i; j < pick.i + need; j++) { slots[j].type = type; slots[j].moved = true; slots[j].alt = pick === second; }
         return true;
       }
       // fall back to the nearest single slots
@@ -152,10 +160,11 @@
       if (cand) { cand.type = "break"; cand.moved = true; } else lostBreaks++;
     });
     if (lostBreaks) notes.push("Meetings took " + (lostBreaks === 1 ? "one of your breaks" : "both of your breaks") + ". Step away for 15 minutes between meetings if you can.");
-    // Cold call bot practice is required: if a meeting covers it, move it, nearest first.
+    // Cold call bot practice: if a meeting covers it, move it to the nearest free half hour in the morning.
+    // It's a lower priority than calling, so it's never moved into the afternoon.
     if (lostSlots("practice")) {
       var ok4 = ensure("practice", R.practiceMinutes / step, L.toMin(R.practiceWindow[0]), L.toMin(R.practiceWindow[1]), ["mobile", "restaurant"]);
-      if (!ok4) notes.push("There's no free half hour for cold call bot practice today. Do it first thing tomorrow.");
+      if (!ok4) notes.push("No free half hour for cold call bot practice this morning, so it's off today's plan. Do it if a morning meeting ends early.");
     }
     if (lostSlots("leads") && lostSlots("leads") === slots.filter(function (s) { return s.base === "leads"; }).length) {
       notes.push("Your lead-cleaning time is taken. Clean today's leads before you log off.");
@@ -188,7 +197,14 @@
       notes.push("Your wrap-up time is taken. Check today's dispositions and set tomorrow's reminders before you log off.");
     }
 
-    return { slots: slots, notes: notes, fixedList: fixedList, callbacks: callbacks, template: template };
+    // Blocks the rep chose to skip: the time stays open on the plan.
+    (choices.skip || []).forEach(function (k) {
+      slots.forEach(function (s) {
+        if (!s.fixed && s.type === k.type && s.start >= k.start && s.start < k.end) { s.skipped = s.type; s.type = "skipped"; }
+      });
+    });
+
+    return { slots: slots, notes: notes, fixedList: fixedList, callbacks: callbacks, template: template, alts: alts };
   };
 
   // Revenue generating activity: talking to prospects. Calling blocks, demos and follow-ups.
@@ -228,12 +244,13 @@
     var out = [];
     plan.slots.forEach(function (s) {
       // Mobile and restaurant time always merges; for other blocks, "(moved)" starts a new block.
-      var key = s.fixed ? "fixed:" + s.fixed.kind + ":" + s.fixed.idx : s.type + ((s.type === "mobile" || s.type === "restaurant") ? "" : "|" + s.moved);
+      var key = s.fixed ? "fixed:" + s.fixed.kind + ":" + s.fixed.idx : s.skipped ? "skipped:" + s.skipped :
+        s.type + ((s.type === "mobile" || s.type === "restaurant") ? "" : "|" + s.moved + "|" + !!s.alt);
       var last = out[out.length - 1];
       var b;
       if (last && last.key === key && last.end === s.start) { b = last; b.end = s.end; b.moved = b.moved || s.moved; }
-      else { b = { key: key, start: s.start, end: s.end, type: s.fixed ? "fixed" : s.type, fixed: s.fixed, moved: s.moved, base: s.base, zones: [], zoneRanges: {} }; out.push(b); }
-      if (s.fixed) return;
+      else { b = { key: key, start: s.start, end: s.end, type: s.fixed ? "fixed" : s.type, fixed: s.fixed, moved: s.moved, alt: !!s.alt, skipped: s.skipped || null, base: s.base, zones: [], zoneRanges: {} }; out.push(b); }
+      if (s.fixed || s.skipped) return;
       L.zonesFor(s.type === "prime" ? "prime" : s.type, s.start).forEach(function (z) {
         var r = b.zoneRanges[z.name];
         if (!r) { b.zoneRanges[z.name] = [s.start, s.end]; b.zones.push(z.name); }
@@ -1050,10 +1067,12 @@
   function load() {
     try { var s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s && s.days) state = s; } catch (e) { /* storage blocked */ }
     if (!state.cal) state.cal = { connected: false };
+    if (!state.choices) state.choices = {};
     var days = L.planDays(new Date());
     if (days.indexOf(state.date) < 0) state.date = days[0];
     // forget task counts for days that have passed
     Object.keys(state.days).forEach(function (k) { if (k < days[0]) delete state.days[k]; });
+    Object.keys(state.choices).forEach(function (k) { if (k < days[0]) delete state.choices[k]; });
   }
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked */ } }
   function dayData(ymd) {
@@ -1088,6 +1107,19 @@
     return el("button", { class: "cal-add", type: "button", text: "+ Calendar", "aria-label": "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar",
       onclick: function () { addBlock(ev, { date: state.date, start: b.start, end: b.end }, this); } });
   }
+  // The rep's choice for a suggested block: keep it (best time), second best, or skip it today.
+  function dayChoices(ymd) {
+    ymd = ymd || state.date;
+    if (!state.choices[ymd]) state.choices[ymd] = { alt: {}, skip: [] };
+    return state.choices[ymd];
+  }
+  function setChoice(b, how) {
+    var ch = dayChoices(), type = b.skipped || b.type;
+    ch.skip = ch.skip.filter(function (k) { return !(k.type === type && k.start < b.end && k.end > b.start); });
+    if (how === "skip") ch.skip.push({ type: type, start: b.start, end: b.end });
+    else ch.alt[type] = how === "second";
+    save(); renderDay();
+  }
   function setIgnored(it, on) {
     var h = (state.cal.hidden || []).filter(function (id) { return id !== it.id; });
     if (on) h.push(it.id);
@@ -1096,7 +1128,7 @@
   }
   function planFor(ymd) {
     ymd = ymd || state.date;
-    var plan = L.buildDay({ day: L.weekdayOf(ymd), items: allItems(ymd) });
+    var plan = L.buildDay({ day: L.weekdayOf(ymd), items: allItems(ymd), choices: dayChoices(ymd) });
     var dd = dayData(ymd);
     return { plan: plan, est: L.estimate(plan, 0, dd.mobileTasks + dd.restaurantTasks) };
   }
@@ -1153,6 +1185,13 @@
       menu.appendChild(el("p", { class: "info-h", text: sec[0] }));
       var ul = el("ul", { class: "info-list" }); sec[1].forEach(function (t) { ul.appendChild(el("li", { text: t })); }); menu.appendChild(ul);
     });
+    if (info.choices) {
+      menu.appendChild(el("p", { class: "info-h", text: "Your plan" }));
+      info.choices.options.forEach(function (o) {
+        menu.appendChild(el("button", { type: "button", role: "menuitemradio", "aria-checked": String(info.choices.cur === o[0]), class: "opt" + (info.choices.cur === o[0] ? " on" : ""),
+          onclick: function () { closeMenu(); info.choices.pick(o[0]); } }, [el("strong", { text: o[1] }), el("span", { text: o[2] })]));
+      });
+    }
     var foot = el("div", { class: "info-foot" });
     if (info.link) foot.appendChild(info.link);
     foot.appendChild(el("button", { type: "button", class: "btn", text: "Close", onclick: function () { closeMenu(); anchor.focus(); } }));
@@ -1176,6 +1215,17 @@
   // ---------- The calendar ----------
   function isRgaBlock(b) {
     return b.type === "fixed" ? (b.fixed.kind === "meeting" && !!b.fixed.item && L.isDemo(b.fixed.item)) : !!(C.blockTypes[b.type] && C.blockTypes[b.type].rga);
+  }
+  // Options for a suggested block that isn't on the calendar yet. A block the planner moved
+  // also gets its second-best time, when there is one.
+  function blockChoices(plan, b) {
+    var type = b.skipped || b.type, a = (plan.alts || {})[type];
+    if (a && !(a.best.start < b.end && a.best.end > b.start) && !(a.second && a.second.start < b.end && a.second.end > b.start)) a = null;
+    var opts = a && a.second ?
+      [["best", "Best time", L.fmtRange(a.best.start, a.best.end) + " ET"], ["second", "Second best", L.fmtRange(a.second.start, a.second.end) + " ET"]] :
+      [["best", "Keep it", "Add it to your calendar with + Calendar"]];
+    opts.push(["skip", "Skip it today", "Take it off your plan"]);
+    return { options: opts, cur: b.skipped ? "skip" : a && a.usingSecond ? "second" : "best", pick: function (how) { setChoice(b, how); } };
   }
   function renderCalendar(plan) {
     var cal = $("calendar"); cal.innerHTML = "";
@@ -1207,13 +1257,20 @@
             "This sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM.";
           makeClickable(li, title + ". Change how it's treated", function () { showMenu(li, f.item, note); });
         }
+      } else if (b.skipped) {
+        var st = "Skipped: " + C.blockTypes[b.skipped].label;
+        li.appendChild(el("div", { class: "b-title" }, [el("span", { text: st }), el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
+        makeClickable(li, st + ", " + L.fmtRange(b.start, b.end) + ". Change it", function () {
+          showInfo(li, { title: st, when: L.fmtRange(b.start, b.end), rga: false, choices: blockChoices(plan, b) });
+        });
       } else {
-        var bt = C.blockTypes[b.type], who = L.whoLine(b), link = (bt.dials || b.type === "practice" || b.type === "leads") ? blockLinkEl(b) : null;
-        var t2 = bt.label + (b.moved ? " (moved)" : "");
+        var bt = C.blockTypes[b.type], who = L.whoLine(b), suggested = bt.dials || b.type === "practice" || b.type === "leads", link = suggested ? blockLinkEl(b) : null;
+        var t2 = bt.label + (b.alt ? " (second best)" : b.moved ? " (moved)" : "");
         li.appendChild(el("div", { class: "b-title" }, [link, el("span", { text: t2 }), el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
         if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who.replace(/^Calling /, "") }));
         makeClickable(li, t2 + ", " + L.fmtRange(b.start, b.end) + ". Show what to do", function () {
-          showInfo(li, { title: t2, when: L.fmtRange(b.start, b.end), who: who, guide: bt, rga: rga, link: link ? blockLinkEl(b) : null });
+          showInfo(li, { title: t2, when: L.fmtRange(b.start, b.end), who: who, guide: bt, rga: rga, link: link ? blockLinkEl(b) : null,
+            choices: suggested && !blockOnCal(b) ? blockChoices(plan, b) : null });
         });
       }
       list.appendChild(li);
@@ -1325,7 +1382,7 @@
         list = el("ul", { class: "add-list" });
         cands.forEach(function (b) { list.appendChild(el("li", null, [C.blockTypes[b.type].label + ", " + L.fmtRange(b.start, b.end), blockLinkEl(b)])); });
       }
-      add("Book about " + L.dur(needMin) + " more calling time" + (bookedMin ? "" : " (you have none yet)") + ". Add these blocks:", list);
+      add("Book about " + L.dur(needMin) + " more calling time" + (bookedMin ? "" : " (you have none yet)") + "." + (list ? " Add these blocks:" : ""), list);
     }
     if (cbs < gB) add((gB - cbs) + " more " + (gB - cbs === 1 ? "callback" : "callbacks") + " to reach " + gB + ". Set a Nooks reminder for every \u201ccall me back.\u201d");
     if (!steps.children.length && chk.idleMinutes >= 15) {

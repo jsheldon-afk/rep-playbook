@@ -396,3 +396,4 @@ button.cal-add:disabled { color: var(--ink-soft); cursor: default; text-decorati
 .rga-line.now .rga-fill { background: var(--green); }
 .rga-line.opt .rga-fill { background: repeating-linear-gradient(135deg, #8fc4b3 0, #8fc4b3 6px, #b9dccf 6px, #b9dccf 12px); }
 .rga-line.now .rga-top strong { color: var(--green); }
+.t-skipped { background: var(--paper); border: 2px dashed #a3a3ad; color: var(--ink-soft); }

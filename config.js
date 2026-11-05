@@ -204,7 +204,7 @@ window.CONFIG = {
   // ---------- Daily templates (times in ET) ----------
   // type: prep | practice | rebooks | mobile | restaurant | prime | sweep | lunch | break | leads | wrap
   // Non-calling time: meetings (from the calendar), demo prep, day organization prep,
-  // cold call bot practice (30 minutes, everyone, every day), cleaning leads,
+  // cold call bot practice (30 minutes, every morning it fits), cleaning leads,
   // a 45-minute lunch and two 15-minute afternoon breaks.
   defaultDay: [
     { start: "09:00", end: "09:30", type: "prep" },
@@ -298,7 +298,8 @@ window.CONFIG = {
     minCallbackMinutes: 30,
     lunchMinutes: 45,
     breakWindow: ["13:00", "17:45"],      // where a break can move if a meeting covers it
-    practiceMinutes: 30,                  // required every day
-    practiceWindow: ["09:00", "17:00"]    // where practice can move if a meeting covers it
+    practiceMinutes: 30,
+    practiceWindow: ["09:00", "12:00"]    // where practice can move if a meeting covers it. Morning only:
+                                          // if there's no free half hour, it's left off the plan (with a note)
   }
 };
