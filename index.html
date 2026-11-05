@@ -9,7 +9,7 @@
 <body>
 <header class="site-head">
   <div class="wrap">
-    <p class="brand">Rep Playbook <small>Plan your calling day</small></p>
+    <p class="brand">Rep Playbook</p>
     <nav class="tabs" id="tabs" aria-label="Sections">
       <a href="#how-it-works" id="tab-how">1. How it works</a>
       <a href="#my-day" id="tab-day">2. My day</a>
@@ -84,12 +84,12 @@
         </div>
 
         <div class="goal-body">
+          <div class="meters" id="meters"></div>
           <div class="goal-inputs">
             <div><label for="mobile-tasks">Mobile call tasks</label><input type="number" id="mobile-tasks" min="0" max="1000" step="1" inputmode="numeric" placeholder="0"></div>
             <div><label for="restaurant-tasks">Restaurant call tasks</label><input type="number" id="restaurant-tasks" min="0" max="1000" step="1" inputmode="numeric" placeholder="0"></div>
-            <div><span class="label-like">Callbacks</span><div class="auto" id="cb-count">0</div><span class="hint">from your calendar</span></div>
+            <div><span class="label-like">Callbacks<span class="hint">from your calendar</span></span><div class="auto" id="cb-count">0</div></div>
           </div>
-          <div class="meters" id="meters"></div>
         </div>
 
         <div class="next">
@@ -108,11 +108,13 @@
 
       <section class="card plan-card" aria-labelledby="plan-title">
         <div class="plan-head">
-          <h2 id="plan-title">Today's plan</h2>
+          <div>
+            <h2 id="plan-title">Today's plan</h2>
+            <p class="hint">Click any block for what to do. Click a meeting or callback to change how it's treated.</p>
+            <p class="legend-line"><i class="t-cbpill" aria-hidden="true"></i> Callbacks: dial them during your blocks. They don't take up time.</p>
+          </div>
           <div class="rga" id="rga"></div>
         </div>
-        <p class="hint">Click any block for what to do. Click a meeting or callback to change how it's treated.</p>
-        <p class="legend-line"><i class="t-cbpill" aria-hidden="true"></i> Callbacks: dial them during your blocks. They don't take up time.</p>
         <ul class="plan-notes" id="plan-notes" hidden></ul>
         <div class="calendar" id="calendar"></div>
         <div class="submit-box" id="submit-box" hidden>

@@ -1307,15 +1307,14 @@
       cal.appendChild(el("div", { class: "rga-tag " + (rga ? "is-rga" : "non-rga"), style: "top:" + (px(b.start) + 1) + "px;height:" + (h - 2) + "px", "aria-hidden": "true" }, [h >= 20 ? (rga ? "RGA" : "Non-RGA") : ""]));
     });
     cal.appendChild(list);
+    nowLine();
     // Callbacks: pills beside the calendar. They don't block time.
     var cbs = (plan.callbacks || []).filter(function (it) { return it.start >= start && it.start < end; });
     cal.classList.toggle("has-lane", cbs.length > 0);
-    var used = {};
+    var lastY = -Infinity, gap = slotPx * 0.8;   // pills sit at their time, pushed down so they never overlap
     cbs.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (it) {
-      var top = px(it.start), key = Math.floor(top / (slotPx * 0.8));
-      while (used[key]) key++;
-      used[key] = true;
-      var y = Math.max(top, key * slotPx * 0.8), name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
+      var y = Math.max(px(it.start), lastY + gap), name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
+      lastY = y;
       var pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.fmt(it.start) + " " + it.label,
         "aria-label": "Callback at " + L.fmt(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.fmt(it.start) }), " " + name]);
       pill.addEventListener("click", function (e) { e.stopPropagation(); showMenu(pill, it); });
@@ -1330,6 +1329,16 @@
       cal.appendChild(box);
     });
   }
+
+  // A red line at the current time on today's plan, like a phone calendar. Moves every minute.
+  function nowLine() {
+    var cal = $("calendar"), line = cal.querySelector(".cal-now"), start = L.toMin(C.dayStart), end = L.toMin(C.dayEnd);
+    var t = L.tzParts(new Date()), show = state.date === t.ymd && t.min >= start && t.min <= end;
+    if (!show) { if (line) line.remove(); return; }
+    if (!line) cal.appendChild(line = el("div", { class: "cal-now", "aria-hidden": "true" }));
+    line.style.top = ((t.min - start) / C.slotMinutes * 30) + "px";
+  }
+  setInterval(function () { if (calFresh()) nowLine(); }, 60000);
 
   // ---------- RGA summary (with the definition) ----------
   function renderRGA(plan) {
@@ -1371,12 +1380,23 @@
     var month = Math.max(1, Math.round(meetings * C.callingDaysPerMonth));
     return "+" + fmtMeet(meetings) + (fmtMeet(meetings) === "1.0" ? " meeting" : " meetings") + " a day, about " + month + " a month, for " + L.dur(mins) + " of dialing.";
   }
-  function meter(label, val, goal) {
-    var pctV = Math.min(100, Math.round(val / Math.max(1, goal) * 100));
-    return el("div", { class: "meter" + (val >= goal ? " done" : "") }, [
-      el("div", { class: "meter-top" }, [el("span", { text: label }), el("strong", { text: val + " of " + goal })]),
-      el("div", { class: "meter-track", role: "img", "aria-label": label + ": " + val + " of " + goal }, [el("div", { class: "meter-fill", style: "width:" + pctV + "%" })])
-    ]);
+  // Two rings, like closing your rings: cold dials outside, callbacks inside.
+  function rings(rows) {
+    var R = [56, 38], W = 14, svg = '<svg class="rings" viewBox="0 0 132 132" aria-hidden="true">';
+    rows.forEach(function (r, i) {
+      var c = 2 * Math.PI * R[i], f = Math.min(1, r.val / Math.max(1, r.goal));
+      svg += '<circle cx="66" cy="66" r="' + R[i] + '" stroke="' + r.color + '" stroke-opacity=".16" stroke-width="' + W + '"/>' +
+        '<circle class="arc" cx="66" cy="66" r="' + R[i] + '" stroke="' + r.color + '" stroke-width="' + W + '" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' +
+        (c * (1 - f)).toFixed(1) + '" transform="rotate(-90 66 66)"' + (f ? '' : ' stroke-opacity="0"') + '/>';
+    });
+    var legend = el("dl", { class: "ring-legend" });
+    rows.forEach(function (r) {
+      legend.appendChild(el("div", { class: r.val >= r.goal ? "done" : null, role: "img", "aria-label": r.label + ": " + r.val + " of " + r.goal }, [
+        el("i", { style: "background:" + r.color, "aria-hidden": "true" }),
+        el("dt", null, [String(r.val), el("small", { text: " of " + r.goal })]),
+        el("dd", { text: r.label })]));
+    });
+    return [el("div", { html: svg + "</svg>" }).firstChild, legend];
   }
   function renderGoal(cur) {
     var dd = dayData(), r = C.bookingRatePerDial, dph = C.dialsPerHour, gC = C.goalColdDials, gB = C.goalCallbacks;
@@ -1396,8 +1416,8 @@
     $("cb-count").textContent = String(cbs);
 
     var m = $("meters"); m.innerHTML = "";
-    m.appendChild(meter("Cold dials you're set up for", coldPlanned, gC));
-    m.appendChild(meter("Callbacks on your calendar", cbs, gB));
+    rings([{ label: "Cold dials you're set up for", val: coldPlanned, goal: gC, color: "var(--ring-cold)" },
+           { label: "Callbacks on your calendar", val: cbs, goal: gB, color: "var(--ring-cb)" }]).forEach(function (n) { m.appendChild(n); });
 
     // Next steps: one line each, most important first
     var steps = $("next-steps"); steps.innerHTML = "";

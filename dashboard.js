@@ -35,6 +35,13 @@
 
   function auth(msg, isErr) {
     var box = $("d-auth"); box.innerHTML = "";
+    // Once signed in, the panel shrinks to one status line with Refresh.
+    box.classList.toggle("signed-in", !!(token && data));
+    if (token && data) {
+      box.appendChild(el("p", { class: "cal-status" + (isErr ? " err" : ""), text: msg || "" }));
+      box.appendChild(el("button", { class: "link-btn", type: "button", text: "Refresh", onclick: signIn }));
+      return;
+    }
     box.appendChild(el("h3", { text: "Sign in" }));
     if (!C.dashboardEndpoint || !C.googleClientId) {
       box.appendChild(el("p", { class: "hint", text: "The dashboard isn't set up yet. See \u201cManager dashboard\u201d in the README." }));
