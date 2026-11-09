@@ -157,7 +157,10 @@
   // Everyone's gameplan side by side: one column per rep, same colors as the rep page.
   function renderPlans(day, onTrack) {
     var box = $("d-plans"); box.innerHTML = "";
+    // From the earliest start to the latest end of anyone's plan (East 9-6 ET, West 11-8 ET), on the hour.
     var d0 = toMin(C.dayStart), d1 = toMin(C.dayEnd), px = 80 / 60;   // 80px an hour
+    day.forEach(function (r) { plan(r).blocks.forEach(function (b) { d0 = Math.min(d0, b.s); d1 = Math.max(d1, b.e); }); });
+    d0 = Math.floor(d0 / 60) * 60; d1 = Math.ceil(d1 / 60) * 60;
     var height = (d1 - d0) * px, y = function (min) { return (Math.max(d0, Math.min(d1, min)) - d0) * px; };
     var hours = el("div", { class: "gp-hours", "aria-hidden": "true" }, [el("div", { class: "gp-head" })]);
     var hb = el("div", { class: "gp-body", style: "height:" + height + "px" });

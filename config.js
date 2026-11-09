@@ -13,7 +13,11 @@ window.CONFIG = {
   showHowItWorks: false,
 
   // ---------- Time ----------
-  repTimezoneLabel: "Eastern Time (ET)",
+  // The plan is built on Eastern time, because the calling windows below are set from it.
+  // Reps see every time in their own Google Calendar's time zone (read when they connect).
+  planTimeZone: "America/New_York",
+  // Shown under the plan unless the rep is on the East coast team with an Eastern calendar.
+  repZoneNote: "{team} day, {hours} {zone}. Times follow your Google Calendar's time zone.",
   // TO CONFIRM: our three calling time zones. offsetFromET: hours behind Eastern.
   zones: [
     { name: "Eastern", short: "ET", offsetFromET: 0 },
@@ -52,7 +56,6 @@ window.CONFIG = {
     changed: "Your plan changed since you submitted at {time}. Submit again so your manager sees the new one.",
     failed: "Couldn't submit. Try again in a minute."
   },
-  repTimeZone: "America/New_York",
   // Calling blocks added from the site carry this tag in their notes, so the site
   // recognizes them when it reads the calendar and doesn't treat them as meetings.
   calendarBlockTag: "[Rep Playbook calling block]",
@@ -81,8 +84,9 @@ window.CONFIG = {
   skipWords: [],                                                   // TO CONFIRM: "Skip words" row
   // Meetings typed into the site have no guest list, so titles with these words count as demos.
   demoTitleKeywords: ["demo", "intro"],
-  // Meetings in this ET window get a "move it if you can" suggestion (demos excluded).
-  protectedWindow: ["15:30", "17:00"],
+  // Meetings in a "prime" block of the rep's day get a "Prime time" chip and a note (demos excluded).
+  // Where to suggest moving a non-demo meeting out of prime time: before the first mobile block, or to wrap-up.
+  primeMoveTimes: ["10:30", "17:45"],
 
   // ---------- Dialing ----------
   dialsPerHour: 45,        // Team target. Calls library, 90 days: about 40-50 per active hour (power 45, parallel 74)
@@ -210,6 +214,59 @@ window.CONFIG = {
     { name: "Fully Booked (Lilia, 4 Charles, etc.)", use: "Always full. More diners isn't a fit right now.", notConfuse: "DM Connect, Not Interested. Use this when capacity is clearly the reason." }
   ],
 
+  // ---------- Teams ----------
+  // The East coast team uses the day, templates and reflow windows below (9:00 AM-6:00 PM ET).
+  // A rep whose Google Calendar is in one of a team's calendarZones gets that team's day instead.
+  // Everything in "day" replaces the East value of the same name (times in ET).
+  // TO CONFIRM: the West coast day was drafted on Nov 9 from the same rules as the East day.
+  teams: [
+    { id: "east", name: "East coast" },
+    { id: "west", name: "West coast", calendarZones: ["America/Los_Angeles", "America/Vancouver", "America/Tijuana"],
+      day: {
+        dayStart: "11:00", dayEnd: "20:00",                 // 8:00 AM-5:00 PM PT
+        defaultDay: [
+          { start: "11:00", end: "11:30", type: "prep" },       //  8:00 PT
+          { start: "11:30", end: "12:00", type: "practice" },   //  8:30
+          { start: "12:00", end: "12:30", type: "rebooks" },    //  9:00
+          { start: "12:30", end: "14:15", type: "mobile" },     //  9:30  every zone's mobiles
+          { start: "14:15", end: "15:00", type: "lunch" },      // 11:15
+          { start: "15:00", end: "15:30", type: "sweep" },      // 12:00
+          { start: "15:30", end: "17:00", type: "prime" },      // 12:30  Eastern prime time
+          { start: "17:00", end: "17:15", type: "break" },      //  2:00
+          { start: "17:15", end: "18:30", type: "restaurant" }, //  2:15  Central prime, Pacific lines open
+          { start: "18:30", end: "19:00", type: "prime" },      //  3:30  Pacific prime time
+          { start: "19:00", end: "19:15", type: "break" },      //  4:00
+          { start: "19:15", end: "19:45", type: "leads" },      //  4:15
+          { start: "19:45", end: "20:00", type: "wrap" }        //  4:45
+        ],
+        // Thu/Fri (best restaurant-line days): restaurant lines from 10:30 PT instead of more mobiles.
+        thuFriDay: [
+          { start: "11:00", end: "11:30", type: "prep" },
+          { start: "11:30", end: "12:00", type: "practice" },
+          { start: "12:00", end: "12:30", type: "rebooks" },
+          { start: "12:30", end: "13:30", type: "mobile" },
+          { start: "13:30", end: "14:15", type: "restaurant" },
+          { start: "14:15", end: "15:00", type: "lunch" },
+          { start: "15:00", end: "15:30", type: "sweep" },
+          { start: "15:30", end: "17:00", type: "prime" },
+          { start: "17:00", end: "17:15", type: "break" },
+          { start: "17:15", end: "18:30", type: "restaurant" },
+          { start: "18:30", end: "19:00", type: "prime" },
+          { start: "19:00", end: "19:15", type: "break" },
+          { start: "19:15", end: "19:45", type: "leads" },
+          { start: "19:45", end: "20:00", type: "wrap" }
+        ],
+        primeMoveTimes: ["12:30", "19:45"],
+        reflow: {
+          morningCallbackWindow: ["11:00", "15:00"],  // before noon PT
+          afternoonSweepWindow: ["16:30", "19:00"],
+          lunchWindow: ["14:00", "17:00"],           // 11:00 AM-2:00 PM PT
+          breakWindow: ["15:00", "19:45"],
+          practiceWindow: ["11:00", "15:00"]         // morning PT only
+        }
+      } }
+  ],
+
   // ---------- Daily templates (times in ET) ----------
   // type: prep | practice | rebooks | mobile | restaurant | prime | sweep | lunch | break | leads | wrap
   // Non-calling time: meetings (from the calendar), demo prep, day organization prep,
@@ -278,7 +335,7 @@ window.CONFIG = {
       why: "Call back everyone who asked today. Same-day follow-up converts best.",
       doThis: ["Call back every owner who asked for a callback today.", "Set a Nooks reminder for anyone you don't reach."],
       tips: ["Callbacks within a day book about 16%; after 3 days, about 9%.", "Each callback gets 5 tries on different days and times."] },
-    lunch: { label: "Lunch", dials: false, rga: false, why: "Restaurants are mid-rush. Take your lunch.",
+    lunch: { label: "Lunch", dials: false, rga: false, why: "Take your full lunch, away from the phone.",
       doThis: ["Step away from the phone."], tips: [] },
     break: { label: "Break", dials: false, rga: false, why: "15 minutes away from the phone.",
       doThis: ["Step away from the phone."], tips: [] },

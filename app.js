@@ -26,6 +26,69 @@
     if (!m) return h + (h === 1 ? " hour" : " hours");
     return h + (h === 1 ? " hour " : " hours ") + m + " minutes";
   };
+  // ---------- Time zones ----------
+  // The plan is built on the Eastern clock (C.planTimeZone): minutes after midnight ET.
+  // Reps see times on their own Google Calendar's clock (L.repZone). L.t / L.tr convert
+  // a plan time for display on the date set with L.setViewDate.
+  L.offsetAt = function (tz, date) { // minutes ahead of UTC at that moment
+    var p = {};
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(date).forEach(function (x) { p[x.type] = x.value; });
+    return Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - date.getTime()) / 60000);
+  };
+  L.validZone = function (tz) {
+    if (!tz) return false;
+    try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch (e) { return false; }
+  };
+  L.browserZone = function () {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return null; }
+  };
+  L.repZone = C.planTimeZone;
+  L.view = { shift: 0, abbr: "ET" };
+  // Short name for a zone on a date: "ET", "CT", "MT", "PT", "AKT", "HT"; otherwise what the browser gives (e.g. "GMT+1").
+  L.zoneAbbr = function (tz, ymd) {
+    var name = "";
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date(ymd + "T16:00:00Z"))
+      .forEach(function (x) { if (x.type === "timeZoneName") name = x.value; });
+    return name.replace(/^([A-Z]{1,2})[SD]T$/, "$1T");
+  };
+  L.setViewDate = function (ymd) {
+    var d = new Date(ymd + "T16:00:00Z"); // midday, clear of daylight-saving switches
+    L.view = { ymd: ymd, shift: L.offsetAt(L.repZone, d) - L.offsetAt(C.planTimeZone, d), abbr: L.zoneAbbr(L.repZone, ymd) };
+  };
+  L.setRepZone = function (tz) {
+    L.repZone = L.validZone(tz) ? tz : C.planTimeZone;
+    L.setTeam(L.teamFor(L.repZone));
+    L.setViewDate(L.view.ymd || L.tzParts(new Date(), L.repZone).ymd);
+  };
+
+  // ---------- Teams ----------
+  // The East coast day is the top-level config. A team's "day" replaces those values while
+  // its rep uses the page, so every other function keeps reading C.dayStart, C.defaultDay, ...
+  var TEAM_KEYS = ["dayStart", "dayEnd", "defaultDay", "thuFriDay", "primeMoveTimes", "reflow"];
+  var EAST = {};
+  TEAM_KEYS.forEach(function (k) { EAST[k] = C[k]; });
+  L.teamFor = function (tz) {
+    var teams = C.teams || [{ id: "east", name: "East coast" }];
+    return teams.filter(function (t) { return (t.calendarZones || []).indexOf(tz) >= 0; })[0] || teams[0];
+  };
+  L.team = (C.teams || [{ id: "east", name: "East coast" }])[0];
+  L.setTeam = function (team) {
+    var day = team.day || {};
+    L.team = team;
+    TEAM_KEYS.forEach(function (k) {
+      if (k === "reflow") C.reflow = Object.assign({}, EAST.reflow, day.reflow || {});
+      else C[k] = day[k] != null ? day[k] : EAST[k];
+    });
+  };
+  // Does start-end overlap restaurant prime time on this team's day? day = 1 (Mon) ... 5 (Fri).
+  L.inPrime = function (start, end, day) {
+    var template = (day === 4 || day === 5) ? C.thuFriDay : C.defaultDay;
+    return template.some(function (b) { return b.type === "prime" && start < L.toMin(b.end) && end > L.toMin(b.start); });
+  };
+  L.t = function (min) { return L.fmt(min + L.view.shift); };
+  L.tr = function (a, b) { return L.fmtRange(a + L.view.shift, b + L.view.shift); };
+
   L.local = function (etMin, zone) { return etMin + zone.offsetFromET * 60; };
   L.et = function (localMin, zone) { return localMin - zone.offsetFromET * 60; };
   function inWin(t, w) { return t >= L.toMin(w[0]) && t < L.toMin(w[1]); }
@@ -147,7 +210,7 @@
     }
     if (lostSlots("lunch") && !ownLunch) {
       var ok3 = ensure("lunch", lunchNeed, L.toMin(R.lunchWindow[0]), L.toMin(R.lunchWindow[1]), ["mobile", "restaurant"]);
-      if (!ok3) notes.push("There's no free " + R.lunchMinutes + " minutes for lunch between 11:30 and 2:00. Eat when you can.");
+      if (!ok3) notes.push("There's no free " + R.lunchMinutes + " minutes for lunch between " + L.t(L.toMin(R.lunchWindow[0])) + " and " + L.t(L.toMin(R.lunchWindow[1])) + ". Eat when you can.");
     }
     // Breaks: each covered break moves to the nearest free calling slot in the afternoon.
     var bw0 = L.toMin(R.breakWindow[0]), bw1 = L.toMin(R.breakWindow[1]), lostBreaks = 0;
@@ -270,9 +333,10 @@
     var parts = zs.map(function (z) {
       var r = (b.zoneRanges && b.zoneRanges[z.name]) || [b.start, b.end];
       var txt = z.name + " " + L.fmtRange(L.local(r[0], z), L.local(r[1], z)) + " local";
-      if (r[0] > b.start && r[1] < b.end) txt += " (" + L.fmtRange(r[0], r[1]) + " ET)";
-      else if (r[0] > b.start) txt += " (from " + L.fmt(r[0]) + " ET)";
-      else if (r[1] < b.end) txt += " (until " + L.fmt(r[1]) + " ET)";
+      var ab = " " + L.view.abbr + ")";
+      if (r[0] > b.start && r[1] < b.end) txt += " (" + L.tr(r[0], r[1]) + ab;
+      else if (r[0] > b.start) txt += " (from " + L.t(r[0]) + ab;
+      else if (r[1] < b.end) txt += " (until " + L.t(r[1]) + ab;
       return txt;
     });
     var what = t === "mobile" ? "mobiles" : (t === "restaurant" || t === "prime") ? "restaurants" : "owners";
@@ -370,9 +434,9 @@
     };
   };
   L.windowText = function (w, zone) {
-    if (!w) return "No good window inside your 9\u20136 day. Ask your manager.";
+    if (!w) return "No good window inside your " + L.tr(L.toMin(C.dayStart), L.toMin(C.dayEnd)) + " day. Ask your manager.";
     var s = L.fmtRange(w.localStart, w.localEnd) + " " + zone.short;
-    if (zone.offsetFromET !== 0) s += " (" + L.fmtRange(w.etStart, w.etEnd) + " ET)";
+    if (zone.offsetFromET * 60 !== L.view.shift) s += " (" + L.tr(w.etStart, w.etEnd) + " " + L.view.abbr + ")";
     return s;
   };
 
@@ -405,16 +469,16 @@
       return !C.internalDomains.some(function (d) { return e.slice(-(d.length + 1)) === "@" + d.toLowerCase(); });
     });
   };
-  // Date -> { ymd, weekday (0-6), min } in the rep's time zone.
-  L.tzParts = function (date) {
-    var f = new Intl.DateTimeFormat("en-US", { timeZone: C.repTimeZone, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  // Date -> { ymd, weekday (0-6), min } on the plan clock (ET), or in tz if given.
+  L.tzParts = function (date, tz) {
+    var f = new Intl.DateTimeFormat("en-US", { timeZone: tz || C.planTimeZone, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
     var p = {}; f.formatToParts(date).forEach(function (x) { p[x.type] = x.value; });
     var wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday);
     return { ymd: p.year + "-" + p.month + "-" + p.day, weekday: wd, min: Number(p.hour) * 60 + Number(p.minute) };
   };
-  // Monday-Friday dates (YYYY-MM-DD, rep time zone) for the week to plan. Weekends plan next week.
+  // Monday-Friday dates (YYYY-MM-DD, rep's calendar time zone) for the week to plan. Weekends plan next week.
   L.planWeek = function (now) {
-    var t = L.tzParts(now);
+    var t = L.tzParts(now, L.repZone);
     var base = new Date(Date.UTC(+t.ymd.slice(0, 4), +t.ymd.slice(5, 7) - 1, +t.ymd.slice(8, 10)));
     var shift = t.weekday === 0 ? 1 : t.weekday === 6 ? 2 : 1 - t.weekday;
     var out = {};
@@ -424,10 +488,10 @@
     }
     return out;
   };
-  // Today (if it's a weekday) and the next business day, as YYYY-MM-DD in the rep's time zone.
+  // Today (if it's a weekday) and the next business day, as YYYY-MM-DD in the rep's calendar time zone.
   // On a weekend: the next two business days.
   L.planDays = function (now) {
-    var t = L.tzParts(now);
+    var t = L.tzParts(now, L.repZone);
     var base = new Date(Date.UTC(+t.ymd.slice(0, 4), +t.ymd.slice(5, 7) - 1, +t.ymd.slice(8, 10)));
     var out = [], d = new Date(base);
     if (t.weekday >= 1 && t.weekday <= 5) out.push(t.ymd);
@@ -471,14 +535,14 @@
 
   // A calling block as a Google Calendar event, created by the site (Calendar API events.insert).
   // Always "Show as: Free" (transparent), so demos can still be booked on top of it.
-  // ymd = YYYY-MM-DD, start/end = minutes in the rep's time zone.
+  // ymd = YYYY-MM-DD, start/end = minutes ET (Google shows it on the rep's own clock).
   L.blockEvent = function (o) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
-    function t(min) { return { dateTime: o.ymd + "T" + p(Math.floor(min / 60)) + ":" + p(min % 60) + ":00", timeZone: C.repTimeZone }; }
+    function t(min) { return { dateTime: o.ymd + "T" + p(Math.floor(min / 60)) + ":" + p(min % 60) + ":00", timeZone: C.planTimeZone }; }
     return { summary: o.title, description: o.details || "", start: t(o.start), end: t(o.end), transparency: "transparent" };
   };
 
-  // Google Calendar "add event" link (callback plan only). ymd = YYYY-MM-DD, start/end = minutes in the rep's time zone.
+  // Google Calendar "add event" link (callback plan only). ymd = YYYY-MM-DD, start/end = minutes ET.
   L.gcalLink = function (o) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
     function f(min) { return o.ymd.replace(/-/g, "") + "T" + p(Math.floor(min / 60)) + p(min % 60) + "00"; }
@@ -486,7 +550,7 @@
       "&text=" + encodeURIComponent(o.title) +
       "&dates=" + f(o.start) + "/" + f(o.end) +
       "&details=" + encodeURIComponent(o.details || "") +
-      "&ctz=" + encodeURIComponent(C.repTimeZone);
+      "&ctz=" + encodeURIComponent(C.planTimeZone);
   };
   L.ymdLocal = function (d) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
@@ -538,26 +602,6 @@
     };
   };
 
-  // ---------- Suggestions ----------
-  // plan/est for today; week = { 1..5: { date, plan, est } }; day = 1-5
-  L.suggest = function (opts) {
-    var out = [], plan = opts.plan, est = opts.est, items = opts.items || [], day = opts.day;
-    var p0 = L.toMin(C.protectedWindow[0]), p1 = L.toMin(C.protectedWindow[1]);
-    // 1) Protect prime time
-    items.forEach(function (it) {
-      if (it.type !== "meeting" || L.isDemo(it)) return;
-      if (it.start < p1 && it.end > p0) out.push({ kind: "prime", item: it, text: q2(it.label) + " (" + L.fmtRange(it.start, it.end) + ") sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM." });
-    });
-    // 2) Demo spacing
-    var sorted = items.slice().sort(function (a, b) { return a.start - b.start; });
-    sorted.forEach(function (it, i) {
-      if (!L.isDemo(it) || it.type !== "meeting") return;
-      var prev = sorted.slice(0, i).filter(function (x) { return x.end > it.start - C.demoPrepMinutes && x.end <= it.start + 1; })[0];
-      if (prev) out.push({ kind: "spacing", text: "No prep time before your " + L.fmt(it.start) + " " + (L.demoKind(it) === "Follow-up" ? "follow-up" : "demo") + ", " + q2(it.label) + ": " + q2(prev.label) + " ends at " + L.fmt(prev.end) + ". Leave " + C.demoPrepMinutes + " minutes between them if you can." });
-    });
-    return out;
-  };
-  function q2(s) { return "\u201c" + s + "\u201d"; }
 
   // ---------- Gameplan for the manager dashboard ----------
   // The day as the rep chose it, as blocks: s/e = minutes ET, k = kind (for color), l = label,
@@ -882,7 +926,7 @@
       var tr = el("tr", null, [
         el("td", { text: "Callback " + i + (i <= done ? " (done)" : i === n ? " (next)" : "") }),
         el("td", { text: when }),
-        el("td", { text: (i === 1 && v.kind === "callbackTime") ? "Their time, converted to ET" : (w ? w.part + ": " + L.windowText(w, zone) : "\u2014") }),
+        el("td", { text: (i === 1 && v.kind === "callbackTime") ? "Their time, converted to yours" : (w ? w.part + ": " + L.windowText(w, zone) : "\u2014") }),
         el("td", null, [link])
       ]);
       if (i === n) tr.querySelectorAll("td").forEach(function (td) { td.className = "now"; });
@@ -931,9 +975,9 @@
       { label: "They asked us to stop calling", set: { d: "Gatekeeper" }, next: "r_dnc" }
     ] },
     r_gk_info: { result: { title: "Save what you learned", log: lg("Gatekeeper", "GK Gave DM Info"), flow: "3d",
-      steps: [["Salesloft", "Add the owner's name or better number to the contact. A new owner cell can go into the mobile cadence."], ["Nooks", "If they told you when the owner is in, set a reminder for then (in ET: Central +1 hour, Pacific +3 hours)."], ["Salesloft", "The cadence keeps running."]] } },
+      steps: [["Salesloft", "Add the owner's name or better number to the contact. A new owner cell can go into the mobile cadence."], ["Nooks", "If they told you when the owner is in, set a reminder for then, converted to your time zone."], ["Salesloft", "The cadence keeps running."]] } },
     r_gk_time: { result: { title: "Call the owner at that time", log: lg("Gatekeeper", "Gave Callback Time"), flow: "3d",
-      steps: [["Nooks", "Set a reminder for that exact time, converted to ET (Central +1 hour, Pacific +3 hours)."], ["You", "Ask for the owner by name when you call."], ["Salesloft", "The cadence keeps running."]] } },
+      steps: [["Nooks", "Set a reminder for that exact time, converted to your time zone."], ["You", "Ask for the owner by name when you call."], ["Salesloft", "The cadence keeps running."]] } },
     r_gk_none: { result: { title: "Keep the cadence going", log: lg("Gatekeeper", "DM Not Available"), flow: "3d",
       steps: [["Salesloft", "The cadence keeps running."], ["You", "Next time, ask for the owner's name and the best time to reach them."]] } },
     r_gk_refused: { result: { title: "Keep the cadence going", log: lg("Gatekeeper", "Refused to Engage / Hung Up"), flow: "3d",
@@ -994,7 +1038,7 @@
       var n = v.count + 1, zone = zoneByName(v.zone), w = L.callbackWindow(v.line, zone, n);
       var steps = [["Salesforce", "Check the account shows DM Connect. It's set automatically when you log " + q(DMC) + "."]];
       if (v.kind === "email" && v.count === 0) steps.push(["You", "Send the email today."]);
-      if (n === 1 && v.kind === "callbackTime") steps.push(["Nooks", "Set a reminder for the exact time they gave you, converted to ET (Central +1 hour, Pacific +3 hours)."]);
+      if (n === 1 && v.kind === "callbackTime") steps.push(["Nooks", "Set a reminder for the exact time they gave you, converted to your time zone."]);
       else steps.push(["Nooks", "Set a reminder for callback " + n + ": " + (w ? w.part.toLowerCase() + ", " + L.windowText(w, zone) : "ask your manager for a time") + "."]);
       if (w && w.fallback) steps.push(["You", "Their best window falls outside your 9\u20136 day, so this is the closest good time."]);
       steps.push(["You", "If you reach them, log that call and start over here."]);
@@ -1097,6 +1141,8 @@
     if (!state.cal) state.cal = { connected: false };
     if (!state.choices) state.choices = {};
     if (!state.submitted) state.submitted = {};
+    // The rep's clock: their Google Calendar's time zone once we've read it, until then the computer's.
+    L.setRepZone(state.tz || L.browserZone());
     var days = L.planDays(new Date());
     if (days.indexOf(state.date) < 0) state.date = days[0];
     // forget task counts for days that have passed
@@ -1134,7 +1180,7 @@
       title: bt.dials ? "Calling: " + bt.label + (b.zones.length ? " (" + b.zones.join(" + ") + ")" : "") : bt.label,
       details: [L.whoLine(b), bt.why, "", C.calendarBlockTag].join("\n")
     });
-    return el("button", { class: "cal-add", type: "button", text: "+ Calendar", "aria-label": "Add " + bt.label + " " + L.fmtRange(b.start, b.end) + " to Google Calendar",
+    return el("button", { class: "cal-add", type: "button", text: "+ Calendar", "aria-label": "Add " + bt.label + " " + L.tr(b.start, b.end) + " to Google Calendar",
       onclick: function () { addBlock(ev, { date: state.date, start: b.start, end: b.end }, this); } });
   }
   // The rep's choice for a suggested block: keep it (best time), second best, or skip it today.
@@ -1163,7 +1209,7 @@
     return { plan: plan, est: L.estimate(plan, 0, dd.mobileTasks + dd.restaurantTasks) };
   }
   function dayName(ymd) {
-    return ymd === L.tzParts(new Date()).ymd ? "Today" : WEEKDAY[L.weekdayOf(ymd)];
+    return ymd === L.tzParts(new Date(), L.repZone).ymd ? "Today" : WEEKDAY[L.weekdayOf(ymd)];
   }
   function shortDate(ymd) {
     var d = new Date(ymd + "T12:00:00");
@@ -1207,7 +1253,7 @@
   function showInfo(anchor, info) {
     var menu = popover(anchor, "cal-info", info.title);
     menu.appendChild(el("p", { class: "cal-menu-title", text: info.title }));
-    menu.appendChild(el("p", { class: "cal-menu-sub", text: info.when + " ET" + (info.rga != null ? (info.rga ? " \u00b7 RGA" : " \u00b7 Non-RGA") : "") }));
+    menu.appendChild(el("p", { class: "cal-menu-sub", text: info.when + " " + L.view.abbr + (info.rga != null ? (info.rga ? " \u00b7 RGA" : " \u00b7 Non-RGA") : "") }));
     if (info.who) menu.appendChild(el("p", { class: "cal-menu-who", text: info.who }));
     var g = info.guide || {};
     [["What to do", g.doThis], ["Tips", g.tips]].forEach(function (sec) {
@@ -1252,7 +1298,7 @@
     var type = b.skipped || b.type, a = (plan.alts || {})[type];
     if (a && !(a.best.start < b.end && a.best.end > b.start) && !(a.second && a.second.start < b.end && a.second.end > b.start)) a = null;
     var opts = a && a.second ?
-      [["best", "Best time", L.fmtRange(a.best.start, a.best.end) + " ET"], ["second", "Second best", L.fmtRange(a.second.start, a.second.end) + " ET"]] :
+      [["best", "Best time", L.tr(a.best.start, a.best.end) + " " + L.view.abbr], ["second", "Second best", L.tr(a.second.start, a.second.end) + " " + L.view.abbr]] :
       [["best", "Keep it", "Add it to your calendar with + Calendar"]];
     opts.push(["skip", "Skip it today", "Take it off your plan"]);
     return { options: opts, cur: b.skipped ? "skip" : a && a.usingSecond ? "second" : "best", pick: function (how) { setChoice(b, how); } };
@@ -1261,12 +1307,11 @@
     var cal = $("calendar"); cal.innerHTML = "";
     var slotPx = 30, start = L.toMin(C.dayStart), end = L.toMin(C.dayEnd);
     var px = function (min) { return (min - start) / C.slotMinutes * slotPx; };
-    var p0 = L.toMin(C.protectedWindow[0]), p1 = L.toMin(C.protectedWindow[1]);
     cal.style.height = px(end) + "px";
     var hours = el("div", { class: "cal-hours", "aria-hidden": "true" });
-    for (var t = start; t <= end; t += 60) hours.appendChild(el("div", { style: "top:" + px(t) + "px", text: L.fmt(t).replace(":00", "") }));
+    for (var t = start; t <= end; t += 60) hours.appendChild(el("div", { style: "top:" + px(t) + "px", text: L.t(t).replace(":00", "") }));
     cal.appendChild(hours);
-    var list = el("ol", { class: "cal-list", "aria-label": "Your plan, " + C.repTimezoneLabel });
+    var list = el("ol", { class: "cal-list", "aria-label": "Your plan, times in " + L.view.abbr });
     L.blocks(plan).forEach(function (b) {
       var h = px(b.end) - px(b.start), rga = isRgaBlock(b);
       var isLunch = b.type === "fixed" && !!b.fixed.item && !!b.fixed.item.lunch;
@@ -1278,28 +1323,28 @@
           var dk = L.demoKind(f.item || f.label);
           title = (dk && !L.hasWord(f.label, [dk]) ? dk + ": " : "") + f.label;
         } else title = f.label;
-        var conflict = f.kind === "meeting" && !rga && f.start < p1 && f.end > p0;
-        li.appendChild(el("div", { class: "b-title" }, [isLunch ? el("span", { class: "cal-add on", text: "\u2713 On calendar" }) : null, conflict ? el("span", { class: "chip warn", text: "Prime time" }) : null, el("span", { text: title }), el("span", { class: "b-time", text: L.fmtRange(f.start, f.end) })]));
+        var conflict = f.kind === "meeting" && !rga && L.inPrime(f.start, f.end, L.weekdayOf(state.date));
+        li.appendChild(el("div", { class: "b-title" }, [isLunch ? el("span", { class: "cal-add on", text: "\u2713 On calendar" }) : null, conflict ? el("span", { class: "chip warn", text: "Prime time" }) : null, el("span", { text: title }), el("span", { class: "b-time", text: L.tr(f.start, f.end) })]));
         if (f.kind === "prep" || f.kind === "post") {
-          makeClickable(li, title + ". Show what to do", function () { showInfo(li, { title: title, when: L.fmtRange(f.start, f.end), guide: C.meetingGuides[f.kind], rga: false }); });
+          makeClickable(li, title + ". Show what to do", function () { showInfo(li, { title: title, when: L.tr(f.start, f.end), guide: C.meetingGuides[f.kind], rga: false }); });
         } else if (f.item) {
-          var note = !conflict ? null : isLunch ? "Your lunch sits in restaurant prime time. If you can, take it between " + L.fmt(L.toMin(C.reflow.lunchWindow[0])) + " and " + L.fmt(L.toMin(C.reflow.lunchWindow[1])) + "." :
-            "This sits in restaurant prime time. If you can, move it before 10:30 AM or to 5:45 PM.";
+          var note = !conflict ? null : isLunch ? "Your lunch sits in restaurant prime time. If you can, take it between " + L.t(L.toMin(C.reflow.lunchWindow[0])) + " and " + L.t(L.toMin(C.reflow.lunchWindow[1])) + "." :
+            "This sits in restaurant prime time. If you can, move it before " + L.t(L.toMin(C.primeMoveTimes[0])) + " or to " + L.t(L.toMin(C.primeMoveTimes[1])) + ".";
           makeClickable(li, title + ". Change how it's treated", function () { showMenu(li, f.item, note); });
         }
       } else if (b.skipped) {
         var st = "Skipped: " + C.blockTypes[b.skipped].label;
-        li.appendChild(el("div", { class: "b-title" }, [el("span", { text: st }), el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
-        makeClickable(li, st + ", " + L.fmtRange(b.start, b.end) + ". Change it", function () {
-          showInfo(li, { title: st, when: L.fmtRange(b.start, b.end), rga: false, choices: blockChoices(plan, b) });
+        li.appendChild(el("div", { class: "b-title" }, [el("span", { text: st }), el("span", { class: "b-time", text: L.tr(b.start, b.end) })]));
+        makeClickable(li, st + ", " + L.tr(b.start, b.end) + ". Change it", function () {
+          showInfo(li, { title: st, when: L.tr(b.start, b.end), rga: false, choices: blockChoices(plan, b) });
         });
       } else {
         var bt = C.blockTypes[b.type], who = L.whoLine(b), suggested = bt.dials || b.type === "practice" || b.type === "leads", link = suggested ? blockLinkEl(b) : null;
         var t2 = bt.label + (b.alt ? " (second best)" : b.moved ? " (moved)" : "");
-        li.appendChild(el("div", { class: "b-title" }, [link, el("span", { text: t2 }), el("span", { class: "b-time", text: L.fmtRange(b.start, b.end) })]));
+        li.appendChild(el("div", { class: "b-title" }, [link, el("span", { text: t2 }), el("span", { class: "b-time", text: L.tr(b.start, b.end) })]));
         if (who && h >= 44) li.appendChild(el("div", { class: "b-who", text: who.replace(/^Calling /, "") }));
-        makeClickable(li, t2 + ", " + L.fmtRange(b.start, b.end) + ". Show what to do", function () {
-          showInfo(li, { title: t2, when: L.fmtRange(b.start, b.end), who: who, guide: bt, rga: rga, link: link ? blockLinkEl(b) : null,
+        makeClickable(li, t2 + ", " + L.tr(b.start, b.end) + ". Show what to do", function () {
+          showInfo(li, { title: t2, when: L.tr(b.start, b.end), who: who, guide: bt, rga: rga, link: link ? blockLinkEl(b) : null,
             choices: suggested && !blockOnCal(b) ? blockChoices(plan, b) : null });
         });
       }
@@ -1315,8 +1360,8 @@
     cbs.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (it) {
       var y = Math.max(px(it.start), lastY + gap), name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
       lastY = y;
-      var pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.fmt(it.start) + " " + it.label,
-        "aria-label": "Callback at " + L.fmt(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.fmt(it.start) }), " " + name]);
+      var pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.t(it.start) + " " + it.label,
+        "aria-label": "Callback at " + L.t(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.t(it.start) }), " " + name]);
       pill.addEventListener("click", function (e) { e.stopPropagation(); showMenu(pill, it); });
       cal.appendChild(pill);
     });
@@ -1410,7 +1455,7 @@
     var util = bookedMin ? Math.min(100, Math.round(usedMin / bookedMin * 100)) : 0;
     var shortTotal = Math.max(0, chk.mobile.short) + Math.max(0, chk.restaurant.short);
 
-    $("goal-label").textContent = (state.date === L.tzParts(new Date()).ymd ? "Today's" : WEEKDAY[L.weekdayOf(state.date)] + "'s") + " goal";
+    $("goal-label").textContent = (state.date === L.tzParts(new Date(), L.repZone).ymd ? "Today's" : WEEKDAY[L.weekdayOf(state.date)] + "'s") + " goal";
     $("goal-big").textContent = gC + " + " + gB;
     var pill = $("goal-pill"); pill.textContent = onTrack ? "On track" : "Not there yet"; pill.className = "status-pill " + (onTrack ? "good" : "bad");
     $("cb-count").textContent = String(cbs);
@@ -1430,7 +1475,7 @@
       var list = null;
       if (cands.length) {
         list = el("ul", { class: "add-list" });
-        cands.forEach(function (b) { list.appendChild(el("li", null, [C.blockTypes[b.type].label + ", " + L.fmtRange(b.start, b.end), blockLinkEl(b)])); });
+        cands.forEach(function (b) { list.appendChild(el("li", null, [C.blockTypes[b.type].label + ", " + L.tr(b.start, b.end), blockLinkEl(b)])); });
       }
       add("Book about " + L.dur(needMin) + " more calling time" + (bookedMin ? "" : " (you have none yet)") + "." + (list ? " Add these blocks:" : ""), list);
     }
@@ -1487,7 +1532,7 @@
     var mini = $("cal-mini"); mini.innerHTML = "";
     if (!C.googleClientId) { box.appendChild(el("p", { class: "hint", text: "Calendar connection isn't set up yet. Your manager adds it once (see the README)." })); return; }
     if (connected) {
-      mini.appendChild(el("span", { class: calMsg && calMsg.err ? "cal-status err" : "hint", text: calMsg ? calMsg.text : "Calendar updated " + new Date(state.cal.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }));
+      mini.appendChild(el("span", { class: calMsg && calMsg.err ? "cal-status err" : "hint", text: calMsg ? calMsg.text : "Calendar updated " + clock(state.cal.fetchedAt) }));
       mini.appendChild(el("button", { class: "link-btn", type: "button", text: "Refresh", onclick: function () { if (token) fetchDays(); else connect(); } }));
       mini.appendChild(el("button", { class: "link-btn", type: "button", text: "Disconnect", onclick: disconnect }));
       return;
@@ -1528,7 +1573,7 @@
     var to = new Date(days[1] + "T00:00:00Z"); to.setUTCDate(to.getUTCDate() + 2);
     var url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250" +
       "&timeMin=" + encodeURIComponent(from.toISOString()) + "&timeMax=" + encodeURIComponent(to.toISOString()) +
-      "&fields=" + encodeURIComponent("items(id,summary,description,htmlLink,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus))");
+      "&fields=" + encodeURIComponent("timeZone,items(id,summary,description,htmlLink,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus))");
     calStatus("Loading your calendar\u2026");
     fetch(url, { headers: { Authorization: "Bearer " + token } }).then(function (r) {
       if (r.status === 401) { token = null; throw new Error("Your Google sign-in expired. Click Refresh."); }
@@ -1536,6 +1581,12 @@
       if (!r.ok) throw new Error("Google Calendar didn't respond (" + r.status + "). Try again in a minute.");
       return r.json();
     }).then(function (data) {
+      // Show everything on the rep's own calendar clock. If that changes which days to plan, load again.
+      if (data.timeZone && L.validZone(data.timeZone) && data.timeZone !== L.repZone) {
+        state.tz = data.timeZone; L.setRepZone(data.timeZone); save();
+        var now = L.planDays(new Date());
+        if (now.join() !== days.join()) { if (now.indexOf(state.date) < 0) state.date = now[0]; fetchDays(); return; }
+      }
       var items = {}, allDay = {}, blocks = {};
       days.forEach(function (d) { items[d] = []; allDay[d] = []; blocks[d] = []; });
       (data.items || []).forEach(function (ev) {
@@ -1579,6 +1630,7 @@
     closeMenu();
     renderConnect();
     if (!calFresh()) return;
+    L.setViewDate(state.date);
     renderDaySwitch();
     var dd = dayData();
     if (document.activeElement !== $("mobile-tasks")) $("mobile-tasks").value = dd.mobileTasks || "";
@@ -1589,6 +1641,10 @@
     cur.rga = renderRGA(cur.plan);
     renderNotes(cur);
     renderCalendar(cur.plan);
+    // Say which day and clock this is, unless it's the plain East coast day on Eastern time.
+    var zn = $("zone-note"), other = L.view.abbr !== L.zoneAbbr(C.planTimeZone, state.date) || L.team !== C.teams[0];
+    zn.hidden = !other;
+    zn.textContent = other ? C.repZoneNote.replace("{team}", L.team.name).replace("{hours}", L.tr(L.toMin(C.dayStart), L.toMin(C.dayEnd))).replace("{zone}", L.view.abbr) : "";
     renderSubmit(cur, tc);
   }
 
@@ -1613,7 +1669,7 @@
     };
   }
   var submitting = false, submitErr = null, lastDay = null;
-  function clock(ms) { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  function clock(ms) { return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: L.repZone }); }
   function renderSubmit(cur, tc) {
     var box = $("submit-box"), T = C.submitText;
     box.hidden = !C.dashboardEndpoint || !tc;

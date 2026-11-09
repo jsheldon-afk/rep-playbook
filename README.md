@@ -5,7 +5,7 @@ Right now only the **My day** tab is live. It plans today and the next business 
 A two-tab site for Seated reps:
 
 1. **How it works**: the operations flow, how to log calls, the reject reason finder, the 5-callback rule, and a "What do I do next?" simulator.
-2. **My day**: a 9:00–6:00 ET calling plan built around your meetings, with expected meetings from your dial goal.
+2. **My day**: a 9:00–6:00 ET calling plan built around your meetings, with expected meetings from your dial goal. West coast reps (Google Calendar on Pacific time) get an 11:00 AM–8:00 PM ET day instead. Times show in each rep's own calendar time zone, so West reps see 8:00 AM–5:00 PM PT. Teams and their days are in `teams` in `config.js`.
 
 Plain HTML, CSS and JavaScript. No build step and no internet needed.
 
