@@ -86,7 +86,7 @@ window.CONFIG = {
   demoTitleKeywords: ["demo", "intro"],
   // Meetings in a "prime" block of the rep's day get a "Prime time" chip and a note (demos excluded).
   // Where to suggest moving a non-demo meeting out of prime time: before the first mobile block, or to wrap-up.
-  primeMoveTimes: ["10:30", "17:45"],
+  primeMoveTimes: ["09:30", "17:45"],
 
   // ---------- Dialing ----------
   dialsPerHour: 45,        // Team target. Calls library, 90 days: about 40-50 per active hour (power 45, parallel 74)
@@ -269,12 +269,12 @@ window.CONFIG = {
 
   // ---------- Daily templates (times in ET) ----------
   // type: prep | practice | rebooks | mobile | restaurant | prime | sweep | lunch | break | leads | wrap
-  // Non-calling time: meetings (from the calendar), demo prep, day organization prep,
-  // cold call bot practice (30 minutes, every morning it fits), cleaning leads,
+  // Non-calling time: meetings (from the calendar), demo prep,
+  // cold call bot practice (30 minutes at 9:00, every morning it fits), cleaning leads,
   // a 45-minute lunch and two 15-minute afternoon breaks.
   defaultDay: [
-    { start: "09:00", end: "09:30", type: "prep" },
-    { start: "09:30", end: "10:00", type: "practice" },
+    { start: "09:00", end: "09:30", type: "practice" },
+    { start: "09:30", end: "10:00", type: "mobile" },
     { start: "10:00", end: "10:30", type: "rebooks" },
     { start: "10:30", end: "12:30", type: "mobile" },
     { start: "12:30", end: "13:15", type: "lunch" },
@@ -289,8 +289,8 @@ window.CONFIG = {
   ],
   // Thursday and Friday: restaurant lines book best, so 2:00-2:30 becomes a restaurant block.
   thuFriDay: [
-    { start: "09:00", end: "09:30", type: "prep" },
-    { start: "09:30", end: "10:00", type: "practice" },
+    { start: "09:00", end: "09:30", type: "practice" },
+    { start: "09:30", end: "10:00", type: "mobile" },
     { start: "10:00", end: "10:30", type: "rebooks" },
     { start: "10:30", end: "12:30", type: "mobile" },
     { start: "12:30", end: "13:15", type: "lunch" },
@@ -316,9 +316,9 @@ window.CONFIG = {
       doThis: ["Run practice calls with the Nooks cold calling bots for 30 minutes."],
       tips: ["Practice the opener you'll use in your first block.", "Work on the objection that cost you the most demos yesterday."] },
     rebooks: { label: "Missed meeting rebooks", dials: true, rga: true, rate: "missedMeetingRebook",
-      why: "Rebook every demo that didn't happen. Done early? Start your mobile block.",
+      why: "Rebook every demo that didn't happen. Done early? Keep dialing mobiles.",
       doThis: ["Call everyone in your Missed Meeting (Nooks) cadence and rebook their demo.", "Reschedule any demo that needs a new time."],
-      tips: ["Rebooks book about 3% of dials, nearly 3 times a cold dial.", "No missed meetings today? Start your mobile block early."] },
+      tips: ["Rebooks book about 3% of dials, nearly 3 times a cold dial.", "No missed meetings today? Keep dialing mobiles."] },
     mobile: { label: "Mobile block", dials: true, rga: true, rate: "mobileBlock",
       why: "Owners pick up their cells late morning to early afternoon. Fresh mobiles first.",
       doThis: ["Call from your Mobile (Nooks) cadence.", "Turn Smart Presence on.", "Filter by time zone to the zones shown on this block."],
