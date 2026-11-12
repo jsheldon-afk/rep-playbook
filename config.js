@@ -221,7 +221,7 @@ window.CONFIG = {
   // TO CONFIRM: the West coast day was drafted on Nov 9 from the same rules as the East day.
   teams: [
     { id: "east", name: "East coast" },
-    { id: "west", name: "West coast", calendarZones: ["America/Los_Angeles", "America/Vancouver", "America/Tijuana"],
+    { id: "west", name: "West coast", calendarZones: ["America/Los_Angeles", "America/Vancouver", "America/Tijuana",   "America/Denver", "America/Boise", "America/Edmonton", "America/Phoenix"], // Mountain reps get this day too, shown on their clock
       day: {
         dayStart: "11:00", dayEnd: "20:00",                 // 8:00 AM-5:00 PM PT
         defaultDay: [
