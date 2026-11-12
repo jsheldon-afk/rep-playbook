@@ -512,6 +512,11 @@
     if (me && me.responseStatus === "declined") return { skip: "declined" };
     var titled = ev.summary || "";
     var isReminder = (C.callbackRules.reminderText || []).some(function (x) { return titled.toUpperCase().indexOf(String(x).toUpperCase()) >= 0; });
+    if ((ev.description || "").indexOf(C.confirmCall.tag) >= 0 && ev.start && ev.start.dateTime) {
+      var ca = L.tzParts(new Date(ev.start.dateTime)), cz = L.tzParts(new Date(ev.end.dateTime));
+      var priv = (ev.extendedProperties && ev.extendedProperties["private"]) || {};
+      return { confirm: { date: ca.ymd, start: ca.min, end: cz.ymd === ca.ymd ? cz.min : 24 * 60, demoId: priv.rpConfirm || null } };
+    }
     var ownBlock = !isReminder && !L.externalGuests(ev).length && L.hasWord(titled, C.callBlockWords);
     if (((ev.description || "").indexOf(C.calendarBlockTag) >= 0 || ownBlock) && ev.start && ev.start.dateTime) {
       var ba = L.tzParts(new Date(ev.start.dateTime)), bb = L.tzParts(new Date(ev.end.dateTime));
@@ -602,6 +607,48 @@
     };
   };
 
+
+  // ---------- Confirm calls before demos ----------
+  // One per demo: minutesBefore the demo, or the nearest open time before it if the rep is busy then
+  // (meetings, demo prep, wrap-up, lunch and breaks are busy; calling blocks aren't). Only if nothing fits before
+  // does it go later, and never into the demo's own prep. onCal: confirm calls already on the calendar
+  // ({ start, end, demoId }); those keep the time the rep gave them.
+  L.confirmCalls = function (plan, onCal) {
+    var K = C.confirmCall, step = C.slotMinutes, len = K.minutes, d0 = L.toMin(C.dayStart);
+    var busy = plan.fixedList.map(function (f) { return [f.start, f.end]; });
+    plan.slots.forEach(function (s) { if (s.type === "lunch" || s.type === "break") busy.push([s.start, s.end]); });   // away from the phone
+    var free = function (t) { return t >= d0 && !busy.some(function (b) { return t < b[1] && t + len > b[0]; }); };
+    var demos = plan.fixedList.filter(function (f) { return f.kind === "meeting" && f.item && K.kinds.indexOf(L.demoKind(f.item)) >= 0; })
+      .sort(function (a, b) { return a.start - b.start; });
+    var left = (onCal || []).slice(), out = [];
+    // Already on the calendar: matched by demo id, otherwise to the next demo after it.
+    demos.forEach(function (d) {
+      var i = -1;
+      left.forEach(function (c, j) { if (i < 0 && c.demoId && c.demoId === d.item.id) i = j; });
+      if (i < 0) left.forEach(function (c, j) { if (i < 0 && !c.demoId && c.start < d.start && !demos.some(function (o) { return o.start > c.start && o.start < d.start; })) i = j; });
+      if (i < 0) return;
+      var c = left.splice(i, 1)[0];
+      out.push({ start: c.start, end: c.end, demo: d.item, onCal: true, moved: false });
+      busy.push([c.start, c.end]);
+    });
+    demos.forEach(function (d) {
+      if (out.some(function (o) { return o.demo === d.item; })) return;
+      var want = d.start - K.minutesBefore, latest = d.start - C.demoPrepMinutes - len, t = null, x;
+      for (x = want; x >= d0; x -= step) if (free(x)) { t = x; break; }
+      if (t == null) for (x = want + step; x <= latest; x += step) if (free(x)) { t = x; break; }
+      if (t == null) return;
+      out.push({ start: t, end: t + len, demo: d.item, onCal: false, moved: t !== want });
+      busy.push([t, t + len]);
+    });
+    return out.sort(function (a, b) { return a.start - b.start; });
+  };
+  // A confirm call as a Google Calendar event (Free, tagged, linked to its demo by id).
+  L.confirmEvent = function (o) {
+    var ev = L.blockEvent({ ymd: o.ymd, start: o.start, end: o.end, title: C.confirmCall.title.replace("{meeting}", o.demo.label),
+      details: C.confirmCall.doThis.map(function (x) { return x.replace("{time}", o.time); }).join("\n") + "\n\n" + C.confirmCall.tag });
+    if (o.demo.id) ev.extendedProperties = { "private": { rpConfirm: String(o.demo.id) } };
+    return ev;
+  };
 
   // ---------- Gameplan for the manager dashboard ----------
   // The day as the rep chose it, as blocks: s/e = minutes ET, k = kind (for color), l = label,
@@ -1183,6 +1230,12 @@
     return el("button", { class: "cal-add", type: "button", text: "+ Calendar", "aria-label": "Add " + bt.label + " " + L.tr(b.start, b.end) + " to Google Calendar",
       onclick: function () { addBlock(ev, { date: state.date, start: b.start, end: b.end }, this); } });
   }
+  function confirmLinkEl(c) {
+    if (c.onCal) return el("span", { class: "cal-add on", text: "\u2713 On calendar" });
+    var ev = L.confirmEvent({ ymd: state.date, start: c.start, end: c.end, demo: c.demo, time: L.t(c.demo.start) });
+    return el("button", { class: "cal-add", type: "button", text: "+ Calendar", "aria-label": "Add the confirm call " + L.tr(c.start, c.end) + " to Google Calendar",
+      onclick: function () { closeMenu(); addBlock(ev, { date: state.date, start: c.start, end: c.end, demoId: c.demo.id || null }, null, false, "confirms"); } });
+  }
   // The rep's choice for a suggested block: keep it (best time), second best, or skip it today.
   function dayChoices(ymd) {
     ymd = ymd || state.date;
@@ -1353,16 +1406,30 @@
     });
     cal.appendChild(list);
     nowLine();
-    // Callbacks: pills beside the calendar. They don't block time.
+    // Callbacks and demo confirm calls: pills beside the calendar. They don't block time.
     var cbs = (plan.callbacks || []).filter(function (it) { return it.start >= start && it.start < end; });
-    cal.classList.toggle("has-lane", cbs.length > 0);
+    var cfs = L.confirmCalls(plan, (state.cal.confirms || {})[state.date] || []).filter(function (c) { return c.start >= start && c.start < end; });
+    cal.classList.toggle("has-lane", cbs.length + cfs.length > 0);
+    var lane = cbs.map(function (it) { return { start: it.start, cb: it }; }).concat(cfs.map(function (c) { return { start: c.start, cf: c }; }));
     var lastY = -Infinity, gap = slotPx * 0.8;   // pills sit at their time, pushed down so they never overlap
-    cbs.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (it) {
-      var y = Math.max(px(it.start), lastY + gap), name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
+    lane.sort(function (a, b) { return a.start - b.start; }).forEach(function (x) {
+      var y = Math.max(px(x.start), lastY + gap), pill;
       lastY = y;
-      var pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.t(it.start) + " " + it.label,
-        "aria-label": "Callback at " + L.t(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.t(it.start) }), " " + name]);
-      pill.addEventListener("click", function (e) { e.stopPropagation(); showMenu(pill, it); });
+      if (x.cb) {
+        var it = x.cb, name = String(it.label).replace(/^\s*REMINDER\s*-\s*/i, "");
+        pill = el("button", { type: "button", class: "cb-pill", style: "top:" + (y + 3) + "px", title: L.t(it.start) + " " + it.label,
+          "aria-label": "Callback at " + L.t(it.start) + ": " + name + ". Change how it's treated" }, [el("strong", { text: L.t(it.start) }), " " + name]);
+        pill.addEventListener("click", function (e) { e.stopPropagation(); showMenu(pill, it); });
+      } else {
+        var c = x.cf, K = C.confirmCall, title = K.title.replace("{meeting}", c.demo.label);
+        pill = el("button", { type: "button", class: "cb-pill cf-pill", style: "top:" + (y + 3) + "px", title: L.t(c.start) + " " + title,
+          "aria-label": title + " at " + L.t(c.start) + ". Show what to do" }, [el("strong", { text: L.t(c.start) }), " " + K.pill + ": " + c.demo.label]);
+        pill.addEventListener("click", function (e) {
+          e.stopPropagation();
+          showInfo(pill, { title: title, when: L.tr(c.start, c.end), who: c.moved ? K.moved : null,
+            guide: { doThis: K.doThis.map(function (t) { return t.replace("{time}", L.t(c.demo.start)); }) }, link: confirmLinkEl(c) });
+        });
+      }
       cal.appendChild(pill);
     });
     // Ignored meetings: dashed outline with a tag to change it back.
@@ -1573,7 +1640,7 @@
     var to = new Date(days[1] + "T00:00:00Z"); to.setUTCDate(to.getUTCDate() + 2);
     var url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250" +
       "&timeMin=" + encodeURIComponent(from.toISOString()) + "&timeMax=" + encodeURIComponent(to.toISOString()) +
-      "&fields=" + encodeURIComponent("timeZone,items(id,summary,description,htmlLink,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus))");
+      "&fields=" + encodeURIComponent("timeZone,items(id,summary,description,htmlLink,start,end,status,transparency,eventType,attendees(email,self,resource,responseStatus),extendedProperties)");
     calStatus("Loading your calendar\u2026");
     fetch(url, { headers: { Authorization: "Bearer " + token } }).then(function (r) {
       if (r.status === 401) { token = null; throw new Error("Your Google sign-in expired. Click Refresh."); }
@@ -1587,23 +1654,25 @@
         var now = L.planDays(new Date());
         if (now.join() !== days.join()) { if (now.indexOf(state.date) < 0) state.date = now[0]; fetchDays(); return; }
       }
-      var items = {}, allDay = {}, blocks = {};
-      days.forEach(function (d) { items[d] = []; allDay[d] = []; blocks[d] = []; });
+      var items = {}, allDay = {}, blocks = {}, confirms = {};
+      days.forEach(function (d) { items[d] = []; allDay[d] = []; blocks[d] = []; confirms[d] = []; });
       (data.items || []).forEach(function (ev) {
         var r = L.eventToItem(ev);
-        if (r.block) { if (blocks[r.block.date]) blocks[r.block.date].push(r.block); }
+        if (r.confirm) { if (confirms[r.confirm.date]) confirms[r.confirm.date].push(r.confirm); }
+        else if (r.block) { if (blocks[r.block.date]) blocks[r.block.date].push(r.block); }
         else if (r.item) { if (items[r.item.date]) items[r.item.date].push(r.item); }
         else if (r.allDay && allDay[r.date]) allDay[r.date].push({ label: r.label, outOfOffice: r.outOfOffice });
       });
       var ids = []; days.forEach(function (d) { items[d].forEach(function (it) { ids.push(it.id); }); });
       var keepHidden = (state.cal.hidden || []).filter(function (id) { return ids.indexOf(id) >= 0; });
-      state.cal = { connected: true, range: days, items: items, allDay: allDay, blocks: blocks, hidden: keepHidden, fetchedAt: Date.now() };
+      state.cal = { connected: true, range: days, items: items, allDay: allDay, blocks: blocks, confirms: confirms, hidden: keepHidden, fetchedAt: Date.now() };
       save(); calMsg = null; renderDay();
     }).catch(function (err) { calStatus(err.message || "Couldn't load your calendar.", true); });
   }
   // Adds a calling block to the rep's calendar as Free, then reloads the calendar so it shows "On calendar".
-  function addBlock(ev, block, btn, retried) {
-    if (!token) { connect(function () { addBlock(ev, block, btn, true); }); return; }
+  function addBlock(ev, block, btn, retried, store) {
+    store = store || "blocks";
+    if (!token) { connect(function () { addBlock(ev, block, btn, true, store); }); return; }
     if (btn) { btn.disabled = true; btn.textContent = "Adding\u2026"; }
     fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(ev)
@@ -1613,9 +1682,9 @@
       if (!r.ok) throw new Error("Google Calendar didn't add the block (" + r.status + "). Try again in a minute.");
       return r.json();
     }).then(function (res) {
-      if (res === "retry") { connect(function () { addBlock(ev, block, btn, true); }); return; }
-      state.cal.blocks = state.cal.blocks || {};
-      (state.cal.blocks[block.date] = state.cal.blocks[block.date] || []).push(block); save(); calMsg = null; renderDay(); fetchDays();
+      if (res === "retry") { connect(function () { addBlock(ev, block, btn, true, store); }); return; }
+      state.cal[store] = state.cal[store] || {};
+      (state.cal[store][block.date] = state.cal[store][block.date] || []).push(block); save(); calMsg = null; renderDay(); fetchDays();
     }).catch(function (err) {
       if (btn) { btn.disabled = false; btn.textContent = "+ Calendar"; }
       calStatus(err.message || "Couldn't add the block.", true);

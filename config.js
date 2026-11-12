@@ -30,7 +30,7 @@ window.CONFIG = {
 
   // Best windows in the RESTAURANT'S local time.
   localWindows: {
-    mobile: ["10:30", "14:00"],          // owners' cells
+    mobile: ["09:30", "14:00"],          // owners' cells (from 9:30 since Nov 12; 10 AM ET mobile dials booked 0.50% vs 0.8-0.9% at 11-12)
     restaurant: ["13:00", "17:00"],      // main restaurant line
     restaurantPrime: ["15:30", "17:00"], // best restaurant-line window of the day
     lunchRush: ["11:30", "13:00"],       // never call restaurant lines in this window (data: 1 PM restaurant dials book well)
@@ -350,6 +350,20 @@ window.CONFIG = {
   },
   // Fixed blocks around prospect meetings (demos and follow-ups).
   demoWrapMinutes: 10,
+  // Confirm call before each demo: a 15-minute suggestion in the callback lane, an hour before.
+  // If the rep is busy then (another meeting, its prep or wrap-up, lunch, a break), it moves to the nearest
+  // open time before; only if nothing fits before does it go later (never into the demo's prep).
+  // Doesn't take up calling time and doesn't count toward the 10 callbacks.
+  confirmCall: {
+    minutesBefore: 60,
+    minutes: 15,
+    kinds: ["Demo"],                            // add "Follow-up" to confirm follow-ups too
+    tag: "[Rep Playbook confirm call]",         // in the notes of confirm calls added with + Calendar
+    pill: "Confirm",
+    title: "Confirm call: {meeting}",
+    doThis: ["Call the owner to confirm your {time} demo.", "Can't make it? Rebook it on the call."],
+    moved: "You're busy an hour before, so this is the nearest open time."
+  },
   meetingGuides: {
     prep: { doThis: ["Review the restaurant and your notes in Salesforce.", "Open the demo deck and test your meeting link."], tips: [] },
     post: { doThis: ["Log the demo or follow-up in Salesforce.", "Send the follow-up email while it's fresh."], tips: [] }
